@@ -715,6 +715,7 @@ function prCard(keys){
     ${distTypes.length>1?`<div class="chips" style="margin-bottom:6px">${distTypes.sort().map(t=>`<button class="chip ${t===prType?"on":""}" data-prtype="${esc(t)}">${esc(t)}</button>`).join("")}</div>`:""}
     <ul class="list">${rows}</ul><div class="small muted" style="margin-top:6px">Fastest logged ${esc(prType.toLowerCase())} at each distance (within about 2%). Use the 1 mi, 5K, 10K and Half buttons when logging to match exactly.</div></div>`;
 }
+const hasPace = x => !!(x.time && x.distance);
 function paceTypes(){ if(Array.isArray(S.settings.paceTypes)) return S.settings.paceTypes; return S.settings.exerciseTypes.includes("Run")?["Run"]:[]; }
 function stat(k,v){ return `<div class="stat"><div class="v">${v}</div><div class="k">${k}</div></div>`; }
 function viewProgress(){
@@ -758,7 +759,7 @@ function viewProgress(){
   h+=`<div class="card"><h2>Exercise</h2><div class="stats">${stat("Workouts",exs.length)}${stat("Miles",miles)}${stat("Time",secs?fmtTime(secs).replace(/:\d\d$/,"")+(secs>=3600?" h":" m"):"—")}</div>
     ${chart(keys,[{vals:dv,type:"bar",color:"var(--pro)"}],{zero:true,fmt:v=>r1(v)})}`;
   // timing & pace: the user picks which exercise types get charts (default Run only)
-  const timedTypes=[...new Set(keys.flatMap(k=>S.days[k]?S.days[k].exercises.filter(e=>e.time).map(e=>e.type):[]))].sort();
+  const timedTypes=[...new Set(keys.flatMap(k=>S.days[k]?S.days[k].exercises.filter(e=>e.time).map(e=>e.type):[]))].sort();   // a type needs at least one timed session to chart
   const shown=paceTypes();
   if(timedTypes.length){
     h+=`<div style="margin-top:16px;font-weight:700">Timing &amp; pace</div><div class="small muted" style="margin:2px 0 8px">Exercises you logged ${progRange==="all"?"overall":"this month"}. Tap to show or hide.</div>
@@ -767,6 +768,11 @@ function viewProgress(){
   shown.filter(t=>timedTypes.includes(t)).forEach(t=>{
     const ents=keys.map(k=>{ const d=S.days[k]; return d? d.exercises.filter(x=>x.type===t&&x.time):[]; });
     const all=ents.flat(); if(!all.length) return;
+    // every logged session of this type counts, even ones without a time
+    const logged=keys.flatMap(k=>S.days[k]? S.days[k].exercises.filter(x=>x.type===t).map(x=>Object.assign({k},x)) : []);
+    const noun = t==="Run"?"runs":"sessions";
+    const missing=(need)=>{ const m=logged.filter(x=>!need(x)); if(!m.length) return "";
+      return `<div class="small muted" style="margin-top:4px">${m.length===1?"1 "+noun.replace(/s$/,""):m.length+" "+noun} not on the chart: ${m.map(x=>`<span class="link" data-day="${x.k}">${shortD(x.k)}</span> (no ${!x.time&&!x.distance?"time or distance":!x.time?"time":"distance"})`).join(", ")}. Tap a date to add it.</div>`; };
     const withDist=all.filter(x=>x.distance);
     if(withDist.length){
       // one point per run: its own average pace; same-day runs sit side by side
@@ -774,13 +780,13 @@ function viewProgress(){
       const bestV=Math.min(...pts.map(p=>p.v)); pts.find(p=>p.v===bestV).best=true;
       const avg=withDist.reduce((a,x)=>a+x.time,0)/withDist.reduce((a,x)=>a+x.distance,0);
       h+=`<div style="margin-top:14px;font-weight:700">${esc(t)} <span class="small muted" style="font-weight:500">pace per ${esc(t.toLowerCase())}, min/mi · lower is faster</span></div>
-        <div class="stats" style="margin-top:8px">${stat(withDist.length===1?"Session":"Sessions",withDist.length)}${stat("Best pace",fmtTime(bestV*60))}${stat("Avg pace",fmtTime(avg))}</div>${chart(keys,[{pts,color:"var(--carb)"}],{h:140,fmt:v=>fmtTime(v*60),goal:avg/60,goalLabel:"avg "+fmtTime(avg)})}
-        <div class="legend"><span><i style="background:var(--carb)"></i>Each dot is one ${esc(t.toLowerCase())}</span><span><i style="background:var(--good)"></i>Best pace</span></div>`;
+        <div class="stats" style="margin-top:8px">${stat(t==="Run"?"Runs":"Sessions",logged.length)}${stat("Best pace",fmtTime(bestV*60))}${stat("Avg pace",fmtTime(avg))}</div>${chart(keys,[{pts,color:"var(--carb)"}],{h:140,fmt:v=>fmtTime(v*60),goal:avg/60,goalLabel:"avg "+fmtTime(avg)})}
+        <div class="legend"><span><i style="background:var(--carb)"></i>Each dot is one ${esc(t.toLowerCase())}</span><span><i style="background:var(--good)"></i>Best pace</span></div>${missing(hasPace)}`;
     } else {
       const tv=ents.map(e=>e.length? e.reduce((a,x)=>a+x.time,0)/60 : null);
       const longest=Math.max(...all.map(x=>x.time)), avg=all.reduce((a,x)=>a+x.time,0)/all.length;
       h+=`<div style="margin-top:14px;font-weight:700">${esc(t)} <span class="small muted" style="font-weight:500">time per day, minutes</span></div>
-        <div class="stats" style="margin-top:8px">${stat("Sessions",all.length)}${stat("Longest",fmtTime(longest))}${stat("Avg time",fmtTime(avg))}</div>${chart(keys,[{vals:tv,type:"bar",color:"var(--carb)"}],{h:120,zero:true,fmt:v=>Math.round(v)})}`;
+        <div class="stats" style="margin-top:8px">${stat(t==="Run"?"Runs":"Sessions",logged.length)}${stat("Longest",fmtTime(longest))}${stat("Avg time",fmtTime(avg))}</div>${chart(keys,[{vals:tv,type:"bar",color:"var(--carb)"}],{h:120,zero:true,fmt:v=>Math.round(v)})}${missing(x=>!!x.time)}`;
     }
   });
   h+=`</div>`;
@@ -844,7 +850,7 @@ function viewSettings(){
   <div class="card"><h2>Your data</h2>
     <p class="small muted" style="margin-top:0">${Object.keys(S.days).length} days logged · stored only on this phone, and never copied to Google backups. ${S.settings.lastBackup?"Last backup: "+nice(keyOf(new Date(S.settings.lastBackup)))+".":"No backup saved yet."} The app reminds you if it's been 30 days.</p>
     <div style="display:grid;gap:8px"><button class="btn" data-act="export">Save backup file</button><button class="btn sec" data-act="import">Import backup file</button><button class="btn sec" data-act="csv">Export spreadsheet (CSV)</button><button class="btn danger" data-act="reset">Erase all data</button></div>
-  </div><p class="small muted" style="text-align:center">Karteria 2.1 · <i>karteria</i>, Stoic steadfast endurance</p></div>`;
+  </div><p class="small muted" style="text-align:center">Karteria 2.2 · <i>karteria</i>, Stoic steadfast endurance</p></div>`;
 }
 function itemSheet(kind,id){
   const K=KINDS[kind], x=id? items(kind).find(s=>s.id===id) : {name:"",dose:"",perDay:1};
