@@ -1,0 +1,23 @@
+# Build output
+build/
+dist/
+*.apk
+*.idsig
+*.dex
+
+# Signing keys: never commit these
+*.keystore
+*.jks
+keystore.properties
+
+# Personal data: backups and exports from the app
+*-backup-*.json
+*-my-history.json
+karteria-*.csv
+fasttrack-*.csv
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
