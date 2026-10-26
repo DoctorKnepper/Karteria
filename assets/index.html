@@ -205,17 +205,16 @@ const esc = s => String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&
 const num = v => { if(v===""||v==null) return null; const n=parseFloat(v); return isNaN(n)?null:n; };
 const r1 = n => Math.round(n*10)/10;
 const kcal = m => Math.round(9*(m.fat||0)+4*(m.carbs||0)+4*(m.protein||0));
-function parseTime(s){ // "mm:ss" | "h:mm:ss" | "45" (minutes)
+/* space (or . , -) typed in a time field becomes ":", at most h:mm:ss */
+function colonize(v){ const parts=String(v).replace(/[^0-9]+/g,":").replace(/^:/,"").split(":").slice(0,3); return parts.map((x,i)=>i?x.slice(0,2):x).join(":"); }
+function parseTime(s){ // "41 19" → m s, "1 16 43" → h m s (space, colon, period or comma between parts)
   if(s==null) return null; s=String(s).trim(); if(!s) return null;
-  const p=s.split(":").map(Number); if(p.some(isNaN)) return null;
-  if(p.length===1) return Math.round(p[0]*60);
-  if(p.length===2) return p[0]*60+p[1];
-  return p[0]*3600+p[1]*60+p[2];
+  const p=s.split(/[^0-9]+/).filter(Boolean).map(Number);
+  if(p.length<2 || p.length>3) return null;
+  if(p.slice(1).some(x=>x>59)) return null;
+  return p.length===2? p[0]*60+p[1] : p[0]*3600+p[1]*60+p[2];
 }
-/* timer-style entry: digits fill from the right (seconds, then minutes, then hours), so no colon key is needed */
-function maskTime(v){ const d=String(v).replace(/\D/g,"").replace(/^0+/,"").slice(0,6); if(!d) return "";
-  const s=d.slice(-2).padStart(2,"0"), m=d.slice(-4,-2), h=d.slice(0,-4);
-  return h? h+":"+m.padStart(2,"0")+":"+s : (m? m : "0")+":"+s; }
+
 function fmtTime(sec){ if(sec==null) return ""; sec=Math.round(sec); const h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),s=sec%60; return h? h+":"+pad(m)+":"+pad(s) : m+":"+pad(s); }
 function fmtPace(sec,mi){ if(!sec||!mi) return ""; return fmtTime(sec/mi)+"/mi"; }
 const netOn = () => !!S.settings.netCarbs;
@@ -550,8 +549,8 @@ function exerciseSheet(idx){
   sheet(`<h3>${idx!=null?"Edit":"Add"} exercise</h3>
     <label class="f">Type</label><div class="chips" id="et">${S.settings.exerciseTypes.map(t=>`<button class="chip ${e.type===t?"on":""}" data-t="${esc(t)}">${esc(t)}</button>`).join("")}<button class="chip" id="etnew">+ New type</button></div>
     <div class="grid2"><div><label class="f">Distance (mi)</label><input id="ed" type="number" inputmode="decimal" step="0.01" value="${e.distance??""}"></div>
-    <div><label class="f">Time</label><input id="eti" inputmode="numeric" autocomplete="off" value="${e.time?fmtTime(e.time):""}" placeholder="0:00"></div></div>
-    <div class="small muted" style="margin-top:4px">Type digits only, the colons fill in: 4119 → 41:19, 11643 → 1:16:43</div>
+    <div><label class="f">Time</label><input id="eti" inputmode="numeric" autocomplete="off" value="${e.time?fmtTime(e.time):""}" placeholder="41:19"></div></div>
+    <div class="small muted" style="margin-top:4px">Press space between parts and it becomes a colon: 41 19 → <b>41:19</b>, 1 16 43 → <b>1:16:43</b></div>
     <div class="chips" style="margin-top:8px"><button class="chip" data-dist="3.107">5K</button><button class="chip" data-dist="6.214">10K</button><button class="chip" data-dist="13.109">Half</button><button class="chip" data-dist="26.219">Marathon</button><button class="chip" data-dist="1">1 mi</button></div>
     <p class="small muted" id="epace" style="margin:8px 0 0"></p>
     <label class="f">Where</label><div class="seg" id="el">${["",...LOCS].map(l=>`<button data-l="${l}" class="${(e.location||"")===l?"on":""}">${l||"—"}</button>`).join("")}</div>
@@ -564,7 +563,7 @@ function exerciseSheet(idx){
     <div style="height:14px"></div><button class="btn full" id="esave">${idx!=null?"Save changes":"Add exercise"}</button>`, el=>{
     const pace=()=>{ const dd=num(gv("ed")), tt=parseTime(gv("eti")); el.querySelector("#epace").textContent = dd&&tt? "Pace "+fmtPace(tt,dd) : ""; };
     el.querySelector("#ed").oninput=pace;
-    el.querySelector("#eti").oninput=ev=>{ ev.target.value=maskTime(ev.target.value); pace(); };
+    el.querySelector("#eti").oninput=ev=>{ ev.target.value=colonize(ev.target.value); pace(); };
     pace();
     el.querySelectorAll("[data-dist]").forEach(b=>b.onclick=()=>{ el.querySelector("#ed").value=b.dataset.dist; pace(); });
     const bindT=()=>el.querySelectorAll("#et [data-t]").forEach(b=>b.onclick=()=>{ e.type=b.dataset.t; el.querySelectorAll("#et [data-t]").forEach(x=>x.classList.toggle("on",x===b)); });
@@ -575,7 +574,7 @@ function exerciseSheet(idx){
     el.querySelectorAll("#emc .chip").forEach(b=>b.onclick=()=>{ e.machine=b.dataset.m; el.querySelector("#emi").value=""; el.querySelectorAll("#emc .chip").forEach(x=>x.classList.toggle("on",x===b)); });
     el.querySelector("#emi").oninput=ev=>{ if(ev.target.value.trim()){ e.machine=ev.target.value.trim(); el.querySelectorAll("#emc .chip").forEach(x=>x.classList.remove("on")); } };
     el.querySelector("#esave").onclick=()=>{
-      const tRaw=gv("eti"); const t=parseTime(tRaw); if(tRaw.trim() && t==null){ toast("Time should look like 39:44 or 1:16:43"); return; }
+      const tRaw=gv("eti"); const t=parseTime(tRaw); if(tRaw.trim() && t==null){ toast("Enter the time as minutes:seconds, like 41:19 (press space for the colon)"); return; }
       const out={type:e.type,distance:num(gv("ed")),time:t,location:e.location||"",machine:e.location==="Machine"?(e.machine||""):"",load:num(gv("eload")),floors:num(gv("efl")),sets:gv("esets").trim(),notes:gv("enotes").trim()};
       Object.keys(out).forEach(k=>{ if(out[k]===null||out[k]==="") delete out[k]; });
       if(idx!=null) d.exercises[idx]=out; else d.exercises.push(out);
@@ -857,7 +856,7 @@ function viewSettings(){
   <div class="card"><h2>Your data</h2>
     <p class="small muted" style="margin-top:0">${Object.keys(S.days).length} days logged · stored only on this phone, and never copied to Google backups. ${S.settings.lastBackup?"Last backup: "+nice(keyOf(new Date(S.settings.lastBackup)))+".":"No backup saved yet."} The app reminds you if it's been 30 days.</p>
     <div style="display:grid;gap:8px"><button class="btn" data-act="export">Save backup file</button><button class="btn sec" data-act="import">Import backup file</button><button class="btn sec" data-act="csv">Export spreadsheet (CSV)</button><button class="btn danger" data-act="reset">Erase all data</button></div>
-  </div><p class="small muted" style="text-align:center">Karteria 2.3 · <i>karteria</i>, Stoic steadfast endurance</p></div>`;
+  </div><p class="small muted" style="text-align:center">Karteria 2.4 · <i>karteria</i>, Stoic steadfast endurance</p></div>`;
 }
 function itemSheet(kind,id){
   const K=KINDS[kind], x=id? items(kind).find(s=>s.id===id) : {name:"",dose:"",perDay:1};
