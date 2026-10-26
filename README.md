@@ -35,7 +35,8 @@
 **Exercise**
 - Any exercise type, including your own (Run, Ruck, Strength, Elliptical…)
 - Distance, time, automatic pace, outdoor / indoor / machine, weight carried, floors, sets
-- Choose which exercises get pace or timing charts
+- Choose which exercises get pace or timing charts; every run is plotted as its own point
+- **Personal records** for 1 mile, 5K, 10K, half marathon and marathon: best time, pace, date and improvement over your first
 
 **Progress & history**
 - Browse month by month, or switch to **All time** for a summary of improvements (weight change, pace gains, best 5K, adherence) and a month-by-month table

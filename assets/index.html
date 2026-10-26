@@ -547,7 +547,7 @@ function exerciseSheet(idx){
     <label class="f">Type</label><div class="chips" id="et">${S.settings.exerciseTypes.map(t=>`<button class="chip ${e.type===t?"on":""}" data-t="${esc(t)}">${esc(t)}</button>`).join("")}<button class="chip" id="etnew">+ New type</button></div>
     <div class="grid2"><div><label class="f">Distance (mi)</label><input id="ed" type="number" inputmode="decimal" step="0.01" value="${e.distance??""}"></div>
     <div><label class="f">Time (h:mm:ss or mm:ss)</label><input id="eti" inputmode="numeric" value="${e.time?fmtTime(e.time):""}" placeholder="39:44"></div></div>
-    <div class="chips" style="margin-top:8px"><button class="chip" data-dist="3.107">5K</button><button class="chip" data-dist="6.214">10K</button><button class="chip" data-dist="13.109">Half</button><button class="chip" data-dist="1">1 mi</button></div>
+    <div class="chips" style="margin-top:8px"><button class="chip" data-dist="3.107">5K</button><button class="chip" data-dist="6.214">10K</button><button class="chip" data-dist="13.109">Half</button><button class="chip" data-dist="26.219">Marathon</button><button class="chip" data-dist="1">1 mi</button></div>
     <p class="small muted" id="epace" style="margin:8px 0 0"></p>
     <label class="f">Where</label><div class="seg" id="el">${["",...LOCS].map(l=>`<button data-l="${l}" class="${(e.location||"")===l?"on":""}">${l||"—"}</button>`).join("")}</div>
     <div id="emach" ${e.location==="Machine"?"":"hidden"}><label class="f">Which machine?</label><div class="chips" id="emc">${MACHINES.map(m=>`<button class="chip ${e.machine===m?"on":""}" data-m="${m}">${m}</button>`).join("")}</div>
@@ -637,7 +637,7 @@ function rangeKeys(){
 function chart(keys, series, o={}){
   // series: [{vals:[n|null], color, type:"line"|"bar"}]
   const W=340,H=o.h||150,L=34,R=8,T=10,B=20, iw=W-L-R, ih=H-T-B;
-  let vals=[]; series.forEach(s=>s.vals.forEach(v=>{if(v!=null)vals.push(v);})); if(o.goal!=null) vals.push(o.goal);
+  let vals=[]; series.forEach(s=>{ (s.vals||[]).forEach(v=>{if(v!=null)vals.push(v);}); (s.pts||[]).forEach(p=>vals.push(p.v)); }); if(o.goal!=null) vals.push(o.goal);
   if(!vals.length) return `<div class="empty-note">No data in this range yet.</div>`;
   let mn=o.min!=null?o.min:Math.min(...vals), mx=o.max!=null?o.max:Math.max(...vals); if(o.zero) mn=0;
   if(mx===mn){ mx+=1; mn-=o.zero?0:1; } const padv=(mx-mn)*0.08; if(!o.zero) mn-=padv; if(o.max==null) mx+=padv;
@@ -647,6 +647,13 @@ function chart(keys, series, o={}){
   const step=Math.max(1,Math.ceil(n/5)); for(let i=0;i<n;i+=step) g+=`<text x="${xs(i)}" y="${H-4}" text-anchor="middle">${shortD(keys[i])}</text>`;
   if(o.goal!=null){ const y=ys(o.goal); g+=`<line x1="${L}" x2="${W-R}" y1="${y}" y2="${y}" stroke="var(--good)" stroke-dasharray="4 4" stroke-width="1.5"/><text x="${W-R}" y="${y-4}" text-anchor="end" style="fill:var(--good)">${o.goalLabel||"goal"}</text>`; }
   series.forEach(s=>{
+    if(s.pts){ // one marker per session; a faint line shows the sequence
+      const P=s.pts.slice().sort((a,b)=>a.x-b.x).map(p=>({X:xs(p.x),Y:ys(p.v),best:p.best,tip:p.tip}));
+      if(P.length>1) g+=`<polyline points="${P.map(p=>p.X+","+p.Y).join(" ")}" fill="none" stroke="${s.color}" stroke-opacity=".35" stroke-width="1.5" stroke-linejoin="round"/>`;
+      P.forEach(p=>{ g+= p.best? `<circle cx="${p.X}" cy="${p.Y}" r="7" fill="none" stroke="var(--good)" stroke-width="2"/><circle cx="${p.X}" cy="${p.Y}" r="4" fill="var(--good)"><title>${p.tip||""}</title></circle>`
+                              : `<circle cx="${p.X}" cy="${p.Y}" r="4" fill="${s.color}" stroke="var(--card)" stroke-width="1.5"><title>${p.tip||""}</title></circle>`; });
+      return;
+    }
     if(s.type==="bar"){ const bw=Math.max(2,Math.min(14,iw/n*0.7)); s.vals.forEach((v,i)=>{ if(v==null) return; const y=ys(v), y0=ys(Math.max(mn,0)); g+=`<rect x="${xs(i)-bw/2}" y="${Math.min(y,y0)}" width="${bw}" height="${Math.max(1,Math.abs(y0-y))}" rx="2" fill="${s.colorFn?s.colorFn(v,i):s.color}"/>`; }); }
     else { const pts=s.vals.map((v,i)=>v==null?null:[xs(i),ys(v)]).filter(Boolean); if(pts.length>1) g+=`<polyline points="${pts.map(p=>p.join(",")).join(" ")}" fill="none" stroke="${s.color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>`; pts.forEach(p=>g+=`<circle cx="${p[0]}" cy="${p[1]}" r="3.2" fill="${s.color}"/>`); }
   });
@@ -688,6 +695,26 @@ function improvementsCard(){
     <div style="margin-top:14px;font-weight:700">Month by month</div><div class="small muted">End-of-month weight. Tap a month to open it.</div><div style="overflow-x:auto"><table class="mtab"><thead><tr><th>Month</th><th>Weight</th><th>Workouts</th><th>Miles</th><th>Run pace</th><th>Avg fast</th></tr></thead><tbody>${mrow}</tbody></table></div></div>`;
 }
 
+const PR_DISTANCES=[["1 mile",1],["5K",3.10686],["10K",6.21371],["Half marathon",13.1094],["Marathon",26.2188]];
+const atDistance=(d,t)=>Math.abs(d-t)<=Math.max(0.03,t*0.02);   // 3.1 or 3.107 both count as a 5K
+let prType=null;
+function prCard(keys){
+  const ex=Object.keys(S.days).sort().flatMap(k=>S.days[k].exercises.filter(e=>e.distance&&e.time).map(e=>Object.assign({k},e)));
+  const types=[...new Set(ex.filter(e=>PR_DISTANCES.some(([,t])=>atDistance(e.distance,t))).map(e=>e.type))].sort();
+  const distTypes=[...new Set(ex.map(e=>e.type))];
+  if(!distTypes.length) return "";
+  if(!prType||!distTypes.includes(prType)) prType = distTypes.includes("Run")? "Run" : (types[0]||distTypes[0]);
+  const inView=k=>progRange==="month" && keys.length && k>=keys[0] && k<=keys[keys.length-1];
+  const rows=PR_DISTANCES.map(([label,t])=>{
+    const efforts=ex.filter(e=>e.type===prType&&atDistance(e.distance,t));
+    if(!efforts.length) return `<li><div class="main"><div class="t">${label}</div><div class="s">No ${esc(prType.toLowerCase())} at this distance yet</div></div><span class="muted" style="font-size:20px;font-weight:800">—</span></li>`;
+    const best=efforts.reduce((a,e)=>e.time<a.time?e:a), first=efforts[0];
+    const gain = efforts.length>1 && first!==best ? `${fmtTime(first.time-best.time)} faster than your first` : (efforts.length>1?"Your first was your best":"Only one so far");
+    return `<li><div class="main"><div class="t">${label} ${inView(best.k)?'<span class="badge good">New this month</span>':""}</div><div class="s">${fmtTime(best.time/best.distance)}/mi · ${nice(best.k)} · ${efforts.length} ${efforts.length===1?"effort":"efforts"} · ${gain}</div></div><span style="font-size:20px;font-weight:800;font-variant-numeric:tabular-nums">${fmtTime(best.time)}</span></li>`; }).join("");
+  return `<div class="card"><h2>Personal records <span class="r small muted" style="text-transform:none;letter-spacing:0">all time</span></h2>
+    ${distTypes.length>1?`<div class="chips" style="margin-bottom:6px">${distTypes.sort().map(t=>`<button class="chip ${t===prType?"on":""}" data-prtype="${esc(t)}">${esc(t)}</button>`).join("")}</div>`:""}
+    <ul class="list">${rows}</ul><div class="small muted" style="margin-top:6px">Fastest logged ${esc(prType.toLowerCase())} at each distance (within about 2%). Use the 1 mi, 5K, 10K and Half buttons when logging to match exactly.</div></div>`;
+}
 function paceTypes(){ if(Array.isArray(S.settings.paceTypes)) return S.settings.paceTypes; return S.settings.exerciseTypes.includes("Run")?["Run"]:[]; }
 function stat(k,v){ return `<div class="stat"><div class="v">${v}</div><div class="k">${k}</div></div>`; }
 function viewProgress(){
@@ -742,10 +769,13 @@ function viewProgress(){
     const all=ents.flat(); if(!all.length) return;
     const withDist=all.filter(x=>x.distance);
     if(withDist.length){
-      const pv=ents.map(e=>{ e=e.filter(x=>x.distance); if(!e.length) return null; return e.reduce((a,x)=>a+x.time,0)/e.reduce((a,x)=>a+x.distance,0)/60; });
-      const best=Math.min(...pv.filter(v=>v!=null)), avg=withDist.reduce((a,x)=>a+x.time,0)/withDist.reduce((a,x)=>a+x.distance,0);
-      h+=`<div style="margin-top:14px;font-weight:700">${esc(t)} <span class="small muted" style="font-weight:500">pace, min/mi · lower is faster</span></div>
-        <div class="stats" style="margin-top:8px">${stat("Sessions",all.length)}${stat("Best pace",fmtTime(best*60))}${stat("Avg pace",fmtTime(avg))}</div>${chart(keys,[{vals:pv,color:"var(--carb)"}],{h:120,fmt:v=>fmtTime(v*60)})}`;
+      // one point per run: its own average pace; same-day runs sit side by side
+      const pts=[]; ents.forEach((e,i)=>{ const r=e.filter(x=>x.distance); r.forEach((x,j)=>pts.push({x:i+(r.length>1?(j-(r.length-1)/2)*0.3:0), v:x.time/x.distance/60, tip:shortD(keys[i])+" · "+r1(x.distance)+" mi · "+fmtTime(x.time/x.distance)+"/mi"})); });
+      const bestV=Math.min(...pts.map(p=>p.v)); pts.find(p=>p.v===bestV).best=true;
+      const avg=withDist.reduce((a,x)=>a+x.time,0)/withDist.reduce((a,x)=>a+x.distance,0);
+      h+=`<div style="margin-top:14px;font-weight:700">${esc(t)} <span class="small muted" style="font-weight:500">pace per ${esc(t.toLowerCase())}, min/mi · lower is faster</span></div>
+        <div class="stats" style="margin-top:8px">${stat(withDist.length===1?"Session":"Sessions",withDist.length)}${stat("Best pace",fmtTime(bestV*60))}${stat("Avg pace",fmtTime(avg))}</div>${chart(keys,[{pts,color:"var(--carb)"}],{h:140,fmt:v=>fmtTime(v*60),goal:avg/60,goalLabel:"avg "+fmtTime(avg)})}
+        <div class="legend"><span><i style="background:var(--carb)"></i>Each dot is one ${esc(t.toLowerCase())}</span><span><i style="background:var(--good)"></i>Best pace</span></div>`;
     } else {
       const tv=ents.map(e=>e.length? e.reduce((a,x)=>a+x.time,0)/60 : null);
       const longest=Math.max(...all.map(x=>x.time)), avg=all.reduce((a,x)=>a+x.time,0)/all.length;
@@ -754,6 +784,7 @@ function viewProgress(){
     }
   });
   h+=`</div>`;
+  h+=prCard(keys);
   return h+`</div>`;
 }
 
@@ -813,7 +844,7 @@ function viewSettings(){
   <div class="card"><h2>Your data</h2>
     <p class="small muted" style="margin-top:0">${Object.keys(S.days).length} days logged · stored only on this phone, and never copied to Google backups. ${S.settings.lastBackup?"Last backup: "+nice(keyOf(new Date(S.settings.lastBackup)))+".":"No backup saved yet."} The app reminds you if it's been 30 days.</p>
     <div style="display:grid;gap:8px"><button class="btn" data-act="export">Save backup file</button><button class="btn sec" data-act="import">Import backup file</button><button class="btn sec" data-act="csv">Export spreadsheet (CSV)</button><button class="btn danger" data-act="reset">Erase all data</button></div>
-  </div><p class="small muted" style="text-align:center">Karteria 2.0 · <i>karteria</i>, Stoic steadfast endurance</p></div>`;
+  </div><p class="small muted" style="text-align:center">Karteria 2.1 · <i>karteria</i>, Stoic steadfast endurance</p></div>`;
 }
 function itemSheet(kind,id){
   const K=KINDS[kind], x=id? items(kind).find(s=>s.id===id) : {name:"",dose:"",perDay:1};
@@ -900,6 +931,7 @@ function bind(){
   ["bps","bpd"].forEach(i=>{ const e=document.getElementById(i); if(e){ e.onchange=bpU; e.oninput=bpU; } });
   if(w) w.oninput=()=>{ const d=day(cur,true); const v=num(w.value); if(v==null) delete d.weight; else d.weight=v; pruneDay(cur); save(); };
   const n=document.getElementById("notes"); if(n){ const sv=()=>{ const d=day(cur,true); d.notes=n.value.trim(); if(!d.notes) delete d.notes; pruneDay(cur); save(); }; n.oninput=sv; n.onchange=sv; n.onblur=sv; }
+  q("[data-prtype]").forEach(b=>b.onclick=()=>{ prType=b.dataset.prtype; const y=window.scrollY; render(); window.scrollTo(0,y); });
   q("[data-pacetype]").forEach(b=>b.onclick=()=>{ const t=b.dataset.pacetype, cur2=paceTypes().slice(), i=cur2.indexOf(t); if(i>=0) cur2.splice(i,1); else cur2.push(t); S.settings.paceTypes=cur2; save(); const y=window.scrollY; render(); window.scrollTo(0,y); });
   q("[data-gomonth]").forEach(b=>b.onclick=()=>{ const [y,m]=b.dataset.gomonth.split("-").map(Number); progMonth=[y,m]; progRange="month"; window.scrollTo(0,0); render(); });
   q("[data-range]").forEach(b=>b.onclick=()=>{ progRange=b.dataset.range; render(); });
