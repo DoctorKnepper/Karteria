@@ -212,6 +212,10 @@ function parseTime(s){ // "mm:ss" | "h:mm:ss" | "45" (minutes)
   if(p.length===2) return p[0]*60+p[1];
   return p[0]*3600+p[1]*60+p[2];
 }
+/* timer-style entry: digits fill from the right (seconds, then minutes, then hours), so no colon key is needed */
+function maskTime(v){ const d=String(v).replace(/\D/g,"").replace(/^0+/,"").slice(0,6); if(!d) return "";
+  const s=d.slice(-2).padStart(2,"0"), m=d.slice(-4,-2), h=d.slice(0,-4);
+  return h? h+":"+m.padStart(2,"0")+":"+s : (m? m : "0")+":"+s; }
 function fmtTime(sec){ if(sec==null) return ""; sec=Math.round(sec); const h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),s=sec%60; return h? h+":"+pad(m)+":"+pad(s) : m+":"+pad(s); }
 function fmtPace(sec,mi){ if(!sec||!mi) return ""; return fmtTime(sec/mi)+"/mi"; }
 const netOn = () => !!S.settings.netCarbs;
@@ -546,7 +550,8 @@ function exerciseSheet(idx){
   sheet(`<h3>${idx!=null?"Edit":"Add"} exercise</h3>
     <label class="f">Type</label><div class="chips" id="et">${S.settings.exerciseTypes.map(t=>`<button class="chip ${e.type===t?"on":""}" data-t="${esc(t)}">${esc(t)}</button>`).join("")}<button class="chip" id="etnew">+ New type</button></div>
     <div class="grid2"><div><label class="f">Distance (mi)</label><input id="ed" type="number" inputmode="decimal" step="0.01" value="${e.distance??""}"></div>
-    <div><label class="f">Time (h:mm:ss or mm:ss)</label><input id="eti" inputmode="numeric" value="${e.time?fmtTime(e.time):""}" placeholder="39:44"></div></div>
+    <div><label class="f">Time</label><input id="eti" inputmode="numeric" autocomplete="off" value="${e.time?fmtTime(e.time):""}" placeholder="0:00"></div></div>
+    <div class="small muted" style="margin-top:4px">Type digits only, the colons fill in: 4119 → 41:19, 11643 → 1:16:43</div>
     <div class="chips" style="margin-top:8px"><button class="chip" data-dist="3.107">5K</button><button class="chip" data-dist="6.214">10K</button><button class="chip" data-dist="13.109">Half</button><button class="chip" data-dist="26.219">Marathon</button><button class="chip" data-dist="1">1 mi</button></div>
     <p class="small muted" id="epace" style="margin:8px 0 0"></p>
     <label class="f">Where</label><div class="seg" id="el">${["",...LOCS].map(l=>`<button data-l="${l}" class="${(e.location||"")===l?"on":""}">${l||"—"}</button>`).join("")}</div>
@@ -558,7 +563,9 @@ function exerciseSheet(idx){
     <label class="f">Notes</label><input id="enotes" value="${esc(e.notes||"")}">
     <div style="height:14px"></div><button class="btn full" id="esave">${idx!=null?"Save changes":"Add exercise"}</button>`, el=>{
     const pace=()=>{ const dd=num(gv("ed")), tt=parseTime(gv("eti")); el.querySelector("#epace").textContent = dd&&tt? "Pace "+fmtPace(tt,dd) : ""; };
-    el.querySelector("#ed").oninput=pace; el.querySelector("#eti").oninput=pace; pace();
+    el.querySelector("#ed").oninput=pace;
+    el.querySelector("#eti").oninput=ev=>{ ev.target.value=maskTime(ev.target.value); pace(); };
+    pace();
     el.querySelectorAll("[data-dist]").forEach(b=>b.onclick=()=>{ el.querySelector("#ed").value=b.dataset.dist; pace(); });
     const bindT=()=>el.querySelectorAll("#et [data-t]").forEach(b=>b.onclick=()=>{ e.type=b.dataset.t; el.querySelectorAll("#et [data-t]").forEach(x=>x.classList.toggle("on",x===b)); });
     bindT();
@@ -850,7 +857,7 @@ function viewSettings(){
   <div class="card"><h2>Your data</h2>
     <p class="small muted" style="margin-top:0">${Object.keys(S.days).length} days logged · stored only on this phone, and never copied to Google backups. ${S.settings.lastBackup?"Last backup: "+nice(keyOf(new Date(S.settings.lastBackup)))+".":"No backup saved yet."} The app reminds you if it's been 30 days.</p>
     <div style="display:grid;gap:8px"><button class="btn" data-act="export">Save backup file</button><button class="btn sec" data-act="import">Import backup file</button><button class="btn sec" data-act="csv">Export spreadsheet (CSV)</button><button class="btn danger" data-act="reset">Erase all data</button></div>
-  </div><p class="small muted" style="text-align:center">Karteria 2.2 · <i>karteria</i>, Stoic steadfast endurance</p></div>`;
+  </div><p class="small muted" style="text-align:center">Karteria 2.3 · <i>karteria</i>, Stoic steadfast endurance</p></div>`;
 }
 function itemSheet(kind,id){
   const K=KINDS[kind], x=id? items(kind).find(s=>s.id===id) : {name:"",dose:"",perDay:1};
