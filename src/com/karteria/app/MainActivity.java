@@ -95,8 +95,14 @@ public class MainActivity extends Activity {
         });
         // Opened from Health Connect's "why does this app need access?" link
         openHealthPrivacy = getIntent() != null && "android.intent.action.VIEW_PERMISSION_USAGE".equals(getIntent().getAction());
-        if (Health.supported()) health = new Health(this, (id, json) -> runOnUiThread(() ->
-                web.evaluateJavascript("window.onHealth(" + id + "," + JSONObject.quote(json) + ")", null)));
+        if (Health.supported()) health = new Health(this, new Health.Reply() {
+            @Override public void send(int id, String json) {
+                runOnUiThread(() -> web.evaluateJavascript("window.onHealth(" + id + "," + JSONObject.quote(json) + ")", null));
+            }
+            @Override public void progress(int id, String step) {
+                runOnUiThread(() -> web.evaluateJavascript("window.onHealthProgress && onHealthProgress(" + id + "," + JSONObject.quote(step) + ")", null));
+            }
+        });
         web.setWebChromeClient(new WebChromeClient());
         web.addJavascriptInterface(new Bridge(), "Android");
         setContentView(root);

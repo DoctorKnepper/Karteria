@@ -860,7 +860,7 @@ function viewSettings(){
   <div class="card"><h2>Your data</h2>
     <p class="small muted" style="margin-top:0">${Object.keys(S.days).length} days logged · stored only on this phone, and never copied to Google backups. ${S.settings.lastBackup?"Last backup: "+nice(keyOf(new Date(S.settings.lastBackup)))+".":"No backup saved yet."} The app reminds you if it's been 30 days.</p>
     <div style="display:grid;gap:8px"><button class="btn" data-act="export">Save backup file</button><button class="btn sec" data-act="import">Import backup file</button><button class="btn sec" data-act="csv">Export spreadsheet (CSV)</button><button class="btn danger" data-act="reset">Erase all data</button></div>
-  </div><p class="small muted" style="text-align:center">Karteria 2.7 · <i>karteria</i>, Stoic steadfast endurance</p></div>`;
+  </div><p class="small muted" style="text-align:center">Karteria 2.7.1 · <i>karteria</i>, Stoic steadfast endurance</p></div>`;
 }
 function itemSheet(kind,id){
   const K=KINDS[kind], x=id? items(kind).find(s=>s.id===id) : {name:"",dose:"",perDay:1};
@@ -965,16 +965,40 @@ window.openHealthPrivacy=()=>{ tab="health"; render(); hPrivacySheet(); };
 let hBusy=false, hMsg="", hStatsBusy=false;
 const DAY=86400000, YEAR=365*DAY;
 function hHistoryMs(){ return ({"1y":1,"2y":2,"5y":5,"all":12}[hs().history||"2y"]||2)*YEAR; }
+/* Recent data first so something shows within seconds, then older history one window at a time (newest first).
+   Every read has a time limit, so a stuck read ends with a message instead of "Reading…" forever. */
+const SYNC_STEP=60*DAY;
+let hSyncId=null, hSyncLabel="", hSyncStep="";
+function hCallT(ms,fn,...args){ return new Promise(res=>{ const id=++hSeq; let done=false;
+  const t=setTimeout(()=>{ if(done) return; done=true; delete hWait[id]; res({timeout:true}); }, ms);
+  hWait[id]=o=>{ if(done) return; done=true; clearTimeout(t); res(o); };
+  if(fn==="hcSync") hSyncId=id;
+  try{ HC[fn](id,...args); }catch(e){ done=true; clearTimeout(t); delete hWait[id]; res({error:String(e.message||e)}); } }); }
+window.onHealthProgress=(id,step)=>{ if(id!==hSyncId) return; hSyncStep=step; hMsg=hSyncLabel+" "+step+"…"; const st=document.getElementById("hstatus"); if(st) st.innerHTML=hStatus(); };
+const monLabel=ms=>{ const d=new Date(ms); return MO[d.getMonth()]+" "+d.getFullYear(); };
+async function hWindow(a,b,label){
+  hSyncLabel=label; hSyncStep=""; hMsg=label.replace(/:$/,"")+"…"; hPaint(true);
+  const r=await hCallT(4*60000,"hcSync",a,b);
+  if(r.timeout){ hMsg="Health Connect stopped answering"+(hSyncStep?" while reading "+hSyncStep:"")+". Keep Karteria open and tap ↻ to try again."; return false; }
+  if(r.error){ hMsg = r.error==="rate"? "Health Connect asked Karteria to slow down. Try again in a few minutes." : "Couldn't read Health Connect ("+r.error+")"; return false; }
+  hMerge(r,a,b);
+  H.syncErrors=r.errors||null; hSave();
+  if(r.errors){ hMsg = r.errors.some(e=>/rate$/.test(e))? "Health Connect asked Karteria to slow down. Tap ↻ in a few minutes." : "Some data couldn't be read. Keep Karteria open and tap ↻ to retry."; return false; }
+  return true;
+}
 async function hSync(full){
   if(!HC||hBusy) return; hRefreshGranted(); if(!hOK()) return;
-  hBusy=true; hMsg="Reading Health Connect…"; hPaint();
-  const now=Date.now(), hist=hGranted.includes("READ_HEALTH_DATA_HISTORY");
-  const deep=now-(hist? hHistoryMs() : 30*DAY);
-  const from = full||!H.lastSync ? deep : Math.max(deep, H.lastSync-3*DAY);
-  const r=await hCall("hcSync", from, now);
-  hBusy=false;
-  if(r.error){ hMsg = r.error==="rate"? "Health Connect asked Karteria to slow down. Try again in a few minutes." : "Couldn't read Health Connect ("+r.error+")"; hPaint(); return; }
-  hMerge(r, from, now); H.lastSync=now; H.hist=hist; hSave(); hMsg=""; hAutoImport(); hPaint(); hStatsQueue();
+  hBusy=true; const now=Date.now(), hist=hGranted.includes("READ_HEALTH_DATA_HISTORY"), deep=now-(hist? hHistoryMs() : 30*DAY);
+  if(full) H.backTo=null;
+  const recentFrom = H.lastSync&&!full&&H.backTo!=null ? Math.max(deep,H.lastSync-3*DAY) : Math.max(deep,now-30*DAY);
+  let ok=await hWindow(recentFrom, now, "Reading recent data:");
+  if(ok){ H.lastSync=now; H.hist=hist; if(H.backTo==null||H.backTo>recentFrom) H.backTo=recentFrom; hSave(); hAutoImport(); hMsg=""; hPaint(); hStatsQueue(); }
+  while(ok && H.backTo>deep+DAY){
+    const a=Math.max(deep,H.backTo-SYNC_STEP);
+    ok=await hWindow(a, H.backTo, "Loading history, "+monLabel(a)+":");
+    if(ok){ H.backTo=a; hSave(); hPaint(true); }
+  }
+  hBusy=false; if(ok) hMsg=""; hSave(); hPaint(); if(ok) hStatsQueue();
 }
 function hMerge(r, from, to){
   const k0=keyOf(new Date(from)), k1=keyOf(new Date(to)), inK=k=>k>=k0&&k<=k1, inT=x=>x.s>=from&&x.s<=to;
@@ -989,7 +1013,7 @@ async function hStatsQueue(){
   while(n<600){
     const need=Object.values(H.workouts).filter(w=>!w.st).sort((a,b)=>b.s-a.s).slice(0,20);
     if(!need.length) break;
-    const r=await hCall("hcStats", JSON.stringify(need.map(w=>({id:w.id,s:w.s,e:w.e}))));
+    const r=await hCallT(120000,"hcStats", JSON.stringify(need.map(w=>({id:w.id,s:w.s,e:w.e}))));
     if(r.error){ if(r.error==="rate") hMsg="Paused loading workout details; Health Connect asked for a break."; break; }
     need.forEach(w=>{ if(H.workouts[w.id]) H.workouts[w.id].st=r[w.id]||{}; }); n+=need.length; hSave(); hPaint(true);
   }
@@ -1001,9 +1025,10 @@ function hPaint(soft){
   if(tab==="health"||(tab==="today"&&!soft)){ const y=window.scrollY; render(); window.scrollTo(0,y); }
 }
 function hStatus(){
-  if(hMsg) return esc(hMsg);
+  if(hMsg) return esc(hMsg)+(hBusy?` <span class="muted">· keep Karteria open</span>`:"");
   const pend=Object.values(H.workouts).filter(w=>!w.st).length;
   return (H.lastSync? "Updated "+ago(H.lastSync) : "Not synced yet") + (pend? ` · loading details for ${pend} workout${pend>1?"s":""}…` : "")
+    + (H.syncErrors&&!hBusy? ` · <span class="link" data-hact="errs">Some data couldn't be read</span>` : "")
     + (H.lastSync&&!H.hist? ` · <span class="link" data-hact="history">Showing recent data only</span>` : "");
 }
 
@@ -1152,8 +1177,8 @@ const hDetail={};
 async function hOpenWorkout(id){
   const w=H.workouts[id]; if(!w) return;
   sheet(`<div id="hwd">${hWorkoutHtml(w,null)}</div>`, el=>hBindWorkout(el,w));
-  if(!w.st){ const r=await hCall("hcStats", JSON.stringify([{id:w.id,s:w.s,e:w.e}])); if(!r.error){ w.st=r[w.id]||{}; hSave(); } }
-  if(!hDetail[id]) hDetail[id]=await hCall("hcDetail", w.id, w.s, w.e);
+  if(!w.st){ const r=await hCallT(120000,"hcStats", JSON.stringify([{id:w.id,s:w.s,e:w.e}])); if(!r.error){ w.st=r[w.id]||{}; hSave(); } }
+  if(!hDetail[id]) hDetail[id]=await hCallT(120000,"hcDetail", w.id, w.s, w.e);
   hRedrawWorkout(w);
 }
 function hRedrawWorkout(w){ const el=document.getElementById("hwd"); if(!el) return; el.innerHTML=hWorkoutHtml(w,hDetail[w.id]); hBindWorkout(el.parentNode,w); }
@@ -1414,6 +1439,7 @@ function hAct(a){
   if(a==="connect"){ if(HC) HC.hcRequest(); }
   else if(a==="sync"){ if(hBusy){ toast("Already syncing"); return; } hSync(false); }
   else if(a==="settings") hSettingsSheet();
+  else if(a==="errs") dialog({title:"What couldn't be read",text:(H.syncErrors||[]).join(" · ")||"Nothing; the last sync was fine.",ok:"OK"});
   else if(a==="history"){ toast("To see older history, allow past data for Karteria in Health Connect"); if(HC&&HC.hcManage) HC.hcManage(); }
 }
 function hBind(q){

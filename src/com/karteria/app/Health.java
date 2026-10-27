@@ -68,7 +68,7 @@ import java.util.concurrent.TimeUnit;
  * page as JSON. Read-only: Karteria never writes to Health Connect. Everything stays on the phone.
  */
 final class Health {
-    interface Reply { void send(int id, String json); }
+    interface Reply { void send(int id, String json); void progress(int id, String step); }
 
     static final String P = "android.permission.health.";
     /** Short names; the full permission is P + name. */
@@ -119,7 +119,7 @@ final class Health {
             @Override public void onResult(R r) { box[0] = r; latch.countDown(); }
             @Override public void onError(HealthConnectException e) { box[1] = e; latch.countDown(); }
         });
-        if (!latch.await(90, TimeUnit.SECONDS)) throw new Exception("Health Connect did not respond");
+        if (!latch.await(45, TimeUnit.SECONDS)) throw new Exception("Health Connect did not respond");
         if (box[1] != null) throw (Exception) box[1];
         return (R) box[0];
     }
@@ -193,16 +193,29 @@ final class Health {
             JSONObject out = new JSONObject();
             out.put("from", fromMs);
             out.put("to", toMs);
-            out.put("days", dailyTotals(from, to));
-            if (has("READ_EXERCISE")) out.put("workouts", workouts(from, to));
-            out.put("vitals", vitals(from, to));
-            if (has("READ_SLEEP")) out.put("sleep", sleep(from, to));
+            JSONArray errors = new JSONArray();
+            // each kind of data is read on its own, so one slow or failing type doesn't block the rest
+            try { reply.progress(id, "workouts"); if (has("READ_EXERCISE")) out.put("workouts", workouts(from, to)); }
+            catch (Exception e) { errors.put("workouts: " + why(e)); }
+            try { reply.progress(id, "daily activity"); out.put("days", dailyTotals(id, from, to)); }
+            catch (Exception e) { errors.put("activity: " + why(e)); }
+            try { reply.progress(id, "body measurements"); out.put("vitals", vitals(from, to)); }
+            catch (Exception e) { errors.put("body: " + why(e)); }
+            try { reply.progress(id, "sleep"); if (has("READ_SLEEP")) out.put("sleep", sleep(from, to)); }
+            catch (Exception e) { errors.put("sleep: " + why(e)); }
+            if (errors.length() > 0) out.put("errors", errors);
             return out;
         });
     }
 
+    private static String why(Exception e) {
+        if (e instanceof HealthConnectException
+                && ((HealthConnectException) e).getErrorCode() == HealthConnectException.ERROR_RATE_LIMIT_EXCEEDED) return "rate";
+        return String.valueOf(e.getMessage());
+    }
+
     @SuppressWarnings({"rawtypes", "unchecked"})
-    private JSONArray dailyTotals(Instant from, Instant to) throws Exception {
+    private JSONArray dailyTotals(int id, Instant from, Instant to) throws Exception {
         Map<String, AggregationType> types = new LinkedHashMap<>();
         if (has("READ_STEPS")) types.put("steps", StepsRecord.STEPS_COUNT_TOTAL);
         if (has("READ_DISTANCE")) types.put("dist", DistanceRecord.DISTANCE_TOTAL);
@@ -210,13 +223,13 @@ final class Health {
         if (has("READ_TOTAL_CALORIES_BURNED")) types.put("tcal", TotalCaloriesBurnedRecord.ENERGY_TOTAL);
         if (has("READ_FLOORS_CLIMBED")) types.put("floors", FloorsClimbedRecord.FLOORS_CLIMBED_TOTAL);
         if (has("READ_EXERCISE")) types.put("exmin", ExerciseSessionRecord.EXERCISE_DURATION_TOTAL);
-        if (has("READ_HEART_RATE")) { types.put("hrmin", HeartRateRecord.BPM_MIN); types.put("hrmax", HeartRateRecord.BPM_MAX); }
         JSONArray days = new JSONArray();
         if (types.isEmpty()) return days;
         ZoneId zone = ZoneId.systemDefault();
         LocalDate start = from.atZone(zone).toLocalDate(), end = to.atZone(zone).toLocalDate().plusDays(1);
-        for (LocalDate a = start; a.isBefore(end); a = a.plusDays(90)) {
-            LocalDate z = a.plusDays(90).isBefore(end) ? a.plusDays(90) : end;
+        for (LocalDate a = start; a.isBefore(end); a = a.plusDays(31)) {
+            LocalDate z = a.plusDays(31).isBefore(end) ? a.plusDays(31) : end;
+            reply.progress(id, "daily activity, " + a.getMonth().toString().substring(0, 1) + a.getMonth().toString().substring(1, 3).toLowerCase() + " " + a.getYear());
             AggregateRecordsRequest.Builder b = new AggregateRecordsRequest.Builder(new LocalTimeRangeFilter.Builder()
                     .setStartTime(a.atStartOfDay()).setEndTime(z.atStartOfDay()).build());
             for (AggregationType t : types.values()) b.addAggregationType(t);
