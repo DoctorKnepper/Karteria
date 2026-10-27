@@ -186,6 +186,7 @@ const todayKey = () => keyOf(new Date());
 const addDays = (k,n) => { const d=parseKey(k); d.setDate(d.getDate()+n); return keyOf(d); };
 const WD = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"], MO=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const nice = k => { const d=parseKey(k); return WD[d.getDay()]+", "+MO[d.getMonth()]+" "+d.getDate(); };
+const fullDate = k => { const d=parseKey(k); return MO[d.getMonth()]+" "+d.getDate()+", "+d.getFullYear(); };
 const shortD = k => { const d=parseKey(k); return (d.getMonth()+1)+"/"+d.getDate(); };
 
 function day(k, create){
@@ -716,7 +717,7 @@ function prCard(keys){
     if(!efforts.length) return `<li><div class="main"><div class="t">${label}</div><div class="s">No ${esc(prType.toLowerCase())} at this distance yet</div></div><span class="muted" style="font-size:20px;font-weight:800">—</span></li>`;
     const best=efforts.reduce((a,e)=>e.time<a.time?e:a), first=efforts[0];
     const gain = efforts.length>1 && first!==best ? `${fmtTime(first.time-best.time)} faster than your first` : (efforts.length>1?"Your first was your best":"Only one so far");
-    return `<li><div class="main"><div class="t">${label} ${inView(best.k)?'<span class="badge good">New this month</span>':""}</div><div class="s">${fmtTime(best.time/best.distance)}/mi · ${nice(best.k)} · ${efforts.length} ${efforts.length===1?"effort":"efforts"} · ${gain}</div></div><span style="font-size:20px;font-weight:800;font-variant-numeric:tabular-nums">${fmtTime(best.time)}</span></li>`; }).join("");
+    return `<li><div class="main"><div class="t">${label} ${inView(best.k)?'<span class="badge good">New this month</span>':""}</div><div class="s">${fmtTime(best.time/best.distance)}/mi · ${fullDate(best.k)} · ${efforts.length} ${efforts.length===1?"effort":"efforts"} · ${gain}</div></div><span style="font-size:20px;font-weight:800;font-variant-numeric:tabular-nums">${fmtTime(best.time)}</span></li>`; }).join("");
   return `<div class="card"><h2>Personal records <span class="r small muted" style="text-transform:none;letter-spacing:0">all time</span></h2>
     ${distTypes.length>1?`<div class="chips" style="margin-bottom:6px">${distTypes.sort().map(t=>`<button class="chip ${t===prType?"on":""}" data-prtype="${esc(t)}">${esc(t)}</button>`).join("")}</div>`:""}
     <ul class="list">${rows}</ul><div class="small muted" style="margin-top:6px">Fastest logged ${esc(prType.toLowerCase())} at each distance (within about 2%). Use the 1 mi, 5K, 10K and Half buttons when logging to match exactly.</div></div>`;
@@ -856,7 +857,7 @@ function viewSettings(){
   <div class="card"><h2>Your data</h2>
     <p class="small muted" style="margin-top:0">${Object.keys(S.days).length} days logged · stored only on this phone, and never copied to Google backups. ${S.settings.lastBackup?"Last backup: "+nice(keyOf(new Date(S.settings.lastBackup)))+".":"No backup saved yet."} The app reminds you if it's been 30 days.</p>
     <div style="display:grid;gap:8px"><button class="btn" data-act="export">Save backup file</button><button class="btn sec" data-act="import">Import backup file</button><button class="btn sec" data-act="csv">Export spreadsheet (CSV)</button><button class="btn danger" data-act="reset">Erase all data</button></div>
-  </div><p class="small muted" style="text-align:center">Karteria 2.5 · <i>karteria</i>, Stoic steadfast endurance</p></div>`;
+  </div><p class="small muted" style="text-align:center">Karteria 2.6 · <i>karteria</i>, Stoic steadfast endurance</p></div>`;
 }
 function itemSheet(kind,id){
   const K=KINDS[kind], x=id? items(kind).find(s=>s.id===id) : {name:"",dose:"",perDay:1};
