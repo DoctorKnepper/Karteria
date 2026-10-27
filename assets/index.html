@@ -860,7 +860,7 @@ function viewSettings(){
   <div class="card"><h2>Your data</h2>
     <p class="small muted" style="margin-top:0">${Object.keys(S.days).length} days logged · stored only on this phone, and never copied to Google backups. ${S.settings.lastBackup?"Last backup: "+nice(keyOf(new Date(S.settings.lastBackup)))+".":"No backup saved yet."} The app reminds you if it's been 30 days.</p>
     <div style="display:grid;gap:8px"><button class="btn" data-act="export">Save backup file</button><button class="btn sec" data-act="import">Import backup file</button><button class="btn sec" data-act="csv">Export spreadsheet (CSV)</button><button class="btn danger" data-act="reset">Erase all data</button></div>
-  </div><p class="small muted" style="text-align:center">Karteria 2.7.2 · <i>karteria</i>, Stoic steadfast endurance</p></div>`;
+  </div><p class="small muted" style="text-align:center">Karteria 2.7.3 · <i>karteria</i>, Stoic steadfast endurance</p></div>`;
 }
 function itemSheet(kind,id){
   const K=KINDS[kind], x=id? items(kind).find(s=>s.id===id) : {name:"",dose:"",perDay:1};
@@ -1050,13 +1050,11 @@ function hAddToLog(w, quiet){
 function hAutoImport(){
   const st=hs(); let changed=false;
   if(st.autoEx) Object.values(H.workouts).sort((a,b)=>a.s-b.s).forEach(w=>{ if(w.d<st.autoEx||!w.st||(st.skip||[]).includes(w.id)||hInLog(w)) return; hAddToLog(w,true); changed=true; });
-  if(st.autoW) Object.entries(H.vitals.weight||{}).forEach(([k,v])=>{ if(k<st.autoW||k>todayKey()) return; const d=S.days[k]; if(d&&d.weight!=null) return; day(k,true).weight=r1(v[0]*KG); changed=true; });
   if(changed) save();
 }
 function hLogHints(k,d,part){
   if(!hOK()) return "";
   if(part==="body"){ const w=(H.vitals.weight||{})[k], bs=(H.vitals.bps||{})[k], bd=(H.vitals.bpd||{})[k], out=[];
-    if(w&&d.weight==null) out.push(`<span>Health Connect: <b>${r1(w[0]*KG)} lb</b> <span class="link" data-huse="w">Use</span></span>`);
     if(bs&&bd&&!d.bp) out.push(`<span>BP <b>${Math.round(bs[0])}/${Math.round(bd[0])}</b> <span class="link" data-huse="bp">Use</span></span>`);
     return out.length? `<div class="small muted" style="margin-top:8px;display:flex;gap:14px;flex-wrap:wrap">${out.join("")}</div>` : ""; }
   const ws=Object.values(H.workouts).filter(w=>w.d===k&&!hInLog(w)).sort((a,b)=>a.s-b.s);
@@ -1115,7 +1113,7 @@ function viewHealth(){
 function hConnectCard(){
   return `<div class="card"><h2>Connect your watch data</h2>
     <p style="margin-top:0">See every workout, your daily activity, body measurements and sleep from your Pixel Watch or Fitbit in one place, with search and full detail for each workout.</p>
-    <ul class="small" style="padding-left:18px;margin:0 0 12px;line-height:1.6"><li><b>Workouts:</b> type, time, distance, pace, heart rate, route, calories</li><li><b>Activity:</b> steps, distance, calories, floors, exercise minutes</li><li><b>Body:</b> weight, body fat, resting heart rate, HRV, blood oxygen, breathing rate, VO₂ max, blood pressure</li><li><b>Sleep:</b> duration and stages</li></ul>
+    <ul class="small" style="padding-left:18px;margin:0 0 12px;line-height:1.6"><li><b>Workouts:</b> type, time, distance, pace, heart rate, route, calories</li><li><b>Activity:</b> steps, distance, calories, floors, exercise minutes</li><li><b>Body:</b> heart-rate trends, resting and sleeping heart rate, HRV, body fat, blood oxygen, breathing rate, VO₂ max, blood pressure</li><li><b>Sleep:</b> duration and stages</li></ul>
     <button class="btn full" data-hact="connect">Connect Health Connect</button>
     <p class="small muted" style="margin:10px 0 0">Karteria only <b>reads</b>, and nothing leaves your phone: the app has no internet access. You choose exactly what to allow, and can change it any time.${NATIVE?"":" <i>(In a desktop browser this loads demo data.)</i>"}</p></div>
     <div class="card"><h2>Before you connect</h2><p class="small" style="margin:0">Your watch data reaches Health Connect through the Fitbit or Google Health app. Open that app's settings, find <b>Health Connect</b>, and make sure sharing is turned on. Then tap Connect above and choose <b>Allow all</b>.</p></div>`;
@@ -1331,7 +1329,7 @@ function hActivity(){
 function hDaySheet(k){
   const d=H.days[k]||{}, ws=Object.values(H.workouts).filter(w=>w.d===k).sort((a,b)=>a.s-b.s), sl=Object.values(H.sleep).filter(s=>s.d===k), V=H.vitals, vit=[];
   const vv=(m,f)=>{ const x=(V[m]||{})[k]; if(x) vit.push(f(x[0])); };
-  vv("weight",v=>["Weight",r1(v*KG)+" lb"]); vv("fat",v=>["Body fat",r1(v)+"%"]); vv("rhr",v=>["Resting HR",Math.round(v)]); vv("hrv",v=>["HRV",Math.round(v)+" ms"]); vv("spo2",v=>["SpO₂",r1(v)+"%"]); vv("resp",v=>["Breathing",r1(v)+"/min"]); vv("vo2",v=>["VO₂ max",r1(v)]);
+vv("fat",v=>["Body fat",r1(v)+"%"]); vv("rhr",v=>["Resting HR",Math.round(v)]); vv("hrv",v=>["HRV",Math.round(v)+" ms"]); vv("spo2",v=>["SpO₂",r1(v)+"%"]); vv("resp",v=>["Breathing",r1(v)+"/min"]); vv("vo2",v=>["VO₂ max",r1(v)]);
   if((V.bps||{})[k]&&(V.bpd||{})[k]) vit.push(["BP",Math.round(V.bps[k][0])+"/"+Math.round(V.bpd[k][0])]);
   const cells=Object.keys(HMET).filter(m=>d[m]!=null).map(m=>[HMET[m].l,HMET[m].f(hVal(k,m))+(HMET[m].u?" "+HMET[m].u:"")]);
   if(d.hrmin) cells.push(["HR range",d.hrmin+"–"+d.hrmax]);
@@ -1360,7 +1358,7 @@ const hvHas = m => H.vitals[m] && Object.keys(H.vitals[m]).length>0;
 function hvAvg(m,a,z){ const v=H.vitals[m]||{}, cv=HVIT[m][2], x=Object.keys(v).filter(k=>k>=a&&k<=z).map(k=>cv(v[k][0])); return x.length? x.reduce((p,q)=>p+q,0)/x.length : null; }
 function hTrendsCard(){
   const tk=todayKey(), w0=addDays(tk,-6), p0=addDays(tk,-36), p1=addDays(tk,-7);
-  const rows=["rhr","hravg","hrsleep","hrlo","hrv","weight","spo2","resp","vo2"].filter(hvHas).map(m=>{
+  const rows=["rhr","hravg","hrsleep","hrlo","hrv","spo2","resp","vo2"].filter(hvHas).map(m=>{
     const [l,u,,dg,,better]=HVIT[m], now=hvAvg(m,w0,tk), before=hvAvg(m,p0,p1); if(now==null) return "";
     const f=v=>dg?r1(v):Math.round(v), ch=before!=null? now-before : null, flat=ch==null||Math.abs(ch)<(dg?0.2:1);
     const good= flat||!better ? null : (better==="down")===(ch<0);
@@ -1396,7 +1394,7 @@ function hBody(){
   if(heart){ h+=`<div style="font-weight:700;margin:16px 4px 8px">Heart</div>`+heart;
     if(!hvHas("rhr")&&hvHas("hravg")) h+=`<div class="small muted" style="margin:-4px 4px 12px">No resting heart rate is being shared to Health Connect. Sleeping heart rate is a close stand-in.</div>`; }
   else if(hGranted.includes("READ_HEART_RATE")&&!hBusy) h+=`<div class="card small muted">Heart-rate trends appear after the next sync. Tap ↻ and keep Karteria open.</div>`;
-  const body=["weight","fat"].map(m=>hVitalCard(m,from)).join("");
+  const body=hVitalCard("fat",from);   // weight is logged on the Log tab, so it isn't repeated here
   let bp=""; const bs=H.vitals.bps, bd=H.vitals.bpd;
   if(bs&&bd){ const ks=Object.keys(bs).filter(k=>k>=from&&bd[k]).sort(); if(ks.length){ const k0=ks[0];
     bp=`<div class="card"><h2>Blood pressure</h2><div class="stats">${stat("Latest",Math.round(bs[ks[ks.length-1]][0])+"/"+Math.round(bd[ks[ks.length-1]][0]))}${stat("Average",Math.round(ks.reduce((a,k)=>a+bs[k][0],0)/ks.length)+"/"+Math.round(ks.reduce((a,k)=>a+bd[k][0],0)/ks.length))}${stat("Readings",ks.length)}</div>`
@@ -1455,15 +1453,14 @@ function hSettingsSheet(){
     <label class="f">How far back to read</label><div class="seg" id="hs-hist">${[["1y","1 year"],["2y","2 years"],["5y","5 years"],["all","All"]].map(([v,l])=>`<button data-v="${v}" class="${(st.history||"2y")===v?"on":""}">${l}</button>`).join("")}</div>
     ${H.lastSync&&!H.hist?`<p class="small muted" style="margin:6px 0 0">Health Connect is only sharing recent data. To see older history, allow <b>past data</b> for Karteria in Health Connect (Android 15 and newer).</p>`:""}
     <label class="row" style="gap:10px;margin-top:14px;align-items:flex-start"><input type="checkbox" id="hs-ax" ${st.autoEx?"checked":""} style="width:22px;height:22px;flex:none;margin-top:2px"><span><b>Add new watch workouts to my log</b><br><span class="small muted">From today on. Older ones can be added one at a time with “+ Add”.</span></span></label>
-    <label class="row" style="gap:10px;margin-top:10px;align-items:flex-start"><input type="checkbox" id="hs-aw" ${st.autoW?"checked":""} style="width:22px;height:22px;flex:none;margin-top:2px"><span><b>Fill in my weight from Health Connect</b><br><span class="small muted">Only on days you haven't entered a weight yourself.</span></span></label>
     ${Object.keys(srcs).length?`<p class="small muted" style="margin:14px 0 0">Workouts from: ${Object.entries(srcs).map(([k,v])=>esc(k)+" ("+v+")").join(", ")}</p>`:""}
     <div style="display:grid;gap:8px;margin-top:14px">${hOK()?`<button class="btn sec" id="hs-perm">Choose what Karteria can read</button><button class="btn sec" id="hs-full">Re-read everything</button>`:""}<button class="btn sec" id="hs-why">Privacy: what's read and why</button>${H.lastSync?`<button class="btn ghost" id="hs-clear" style="color:var(--bad)">Clear the cached copy on this phone</button>`:""}</div>
     <button class="btn full" style="margin-top:12px" id="hs-done">Done</button>`, el=>{
     let hist=st.history||"2y";
     el.querySelectorAll("#hs-hist button").forEach(b=>b.onclick=()=>{ hist=b.dataset.v; el.querySelectorAll("#hs-hist button").forEach(x=>x.classList.toggle("on",x===b)); });
     const commit=()=>{ st.maxHr=num(gv("hs-mx"))||undefined; st.stepGoal=num(gv("hs-sg"))||undefined; const histChanged=hist!==(st.history||"2y"); st.history=hist;
-      const ax=el.querySelector("#hs-ax").checked, aw=el.querySelector("#hs-aw").checked;
-      st.autoEx= ax? (st.autoEx||todayKey()) : undefined; st.autoW= aw? (st.autoW||todayKey()) : undefined;
+      const ax=el.querySelector("#hs-ax").checked;
+      st.autoEx= ax? (st.autoEx||todayKey()) : undefined; delete st.autoW;
       Object.keys(st).forEach(k=>st[k]===undefined&&delete st[k]); save(); hAutoImport(); return histChanged; };
     el.querySelector("#hs-done").onclick=()=>{ const ch=commit(); closeSheet(); render(); if(ch) hSync(true); };
     const q=s=>el.querySelector(s);
