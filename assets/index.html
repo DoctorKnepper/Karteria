@@ -860,7 +860,7 @@ function viewSettings(){
   <div class="card"><h2>Your data</h2>
     <p class="small muted" style="margin-top:0">${Object.keys(S.days).length} days logged · stored only on this phone, and never copied to Google backups. ${S.settings.lastBackup?"Last backup: "+nice(keyOf(new Date(S.settings.lastBackup)))+".":"No backup saved yet."} The app reminds you if it's been 30 days.</p>
     <div style="display:grid;gap:8px"><button class="btn" data-act="export">Save backup file</button><button class="btn sec" data-act="import">Import backup file</button><button class="btn sec" data-act="csv">Export spreadsheet (CSV)</button><button class="btn danger" data-act="reset">Erase all data</button></div>
-  </div><p class="small muted" style="text-align:center">Karteria 2.7.3 · <i>karteria</i>, Stoic steadfast endurance</p></div>`;
+  </div><p class="small muted" style="text-align:center">Karteria 2.7.4 · <i>karteria</i>, Stoic steadfast endurance</p></div>`;
 }
 function itemSheet(kind,id){
   const K=KINDS[kind], x=id? items(kind).find(s=>s.id===id) : {name:"",dose:"",perDay:1};
@@ -1392,7 +1392,9 @@ function hBody(){
   h+=hTrendsCard();
   const heart=["rhr","hravg"].map(m=>hVitalCard(m,from)).join("")+hRangeCard(from)+["hrsleep","hrv"].map(m=>hVitalCard(m,from)).join("");
   if(heart){ h+=`<div style="font-weight:700;margin:16px 4px 8px">Heart</div>`+heart;
-    if(!hvHas("rhr")&&hvHas("hravg")) h+=`<div class="small muted" style="margin:-4px 4px 12px">No resting heart rate is being shared to Health Connect. Sleeping heart rate is a close stand-in.</div>`; }
+    if(!hvHas("rhr")&&hvHas("hravg")) h+= hGranted.includes("READ_RESTING_HEART_RATE")
+      ? `<div class="small muted" style="margin:-4px 4px 12px">Karteria can read resting heart rate, but Health Connect has no resting heart rate records for this period. Open Health Connect → Data and access → Vitals to see whether your watch app is writing any. Sleeping heart rate above is a close stand-in.</div>`
+      : `<div class="small muted" style="margin:-4px 4px 12px">Karteria isn't allowed to read <b>resting heart rate</b>. <span class="link" data-hact="perms">Allow it in Health Connect</span>, then tap ↻.</div>`; }
   else if(hGranted.includes("READ_HEART_RATE")&&!hBusy) h+=`<div class="card small muted">Heart-rate trends appear after the next sync. Tap ↻ and keep Karteria open.</div>`;
   const body=hVitalCard("fat",from);   // weight is logged on the Log tab, so it isn't repeated here
   let bp=""; const bs=H.vitals.bps, bd=H.vitals.bpd;
@@ -1474,6 +1476,7 @@ function hAct(a){
   if(a==="connect"){ if(HC) HC.hcRequest(); }
   else if(a==="sync"){ if(hBusy){ toast("Already syncing"); return; } hSync(false); }
   else if(a==="settings") hSettingsSheet();
+  else if(a==="perms"){ if(HC&&HC.hcManage) HC.hcManage(); }
   else if(a==="errs") dialog({title:"What couldn't be read",text:(H.syncErrors||[]).join(" · ")||"Nothing; the last sync was fine.",ok:"OK"});
   else if(a==="history"){ toast("To see older history, allow past data for Karteria in Health Connect"); if(HC&&HC.hcManage) HC.hcManage(); }
 }
