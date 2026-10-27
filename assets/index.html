@@ -860,7 +860,7 @@ function viewSettings(){
   <div class="card"><h2>Your data</h2>
     <p class="small muted" style="margin-top:0">${Object.keys(S.days).length} days logged · stored only on this phone, and never copied to Google backups. ${S.settings.lastBackup?"Last backup: "+nice(keyOf(new Date(S.settings.lastBackup)))+".":"No backup saved yet."} The app reminds you if it's been 30 days.</p>
     <div style="display:grid;gap:8px"><button class="btn" data-act="export">Save backup file</button><button class="btn sec" data-act="import">Import backup file</button><button class="btn sec" data-act="csv">Export spreadsheet (CSV)</button><button class="btn danger" data-act="reset">Erase all data</button></div>
-  </div><p class="small muted" style="text-align:center">Karteria 2.7.4 · <i>karteria</i>, Stoic steadfast endurance</p></div>`;
+  </div><p class="small muted" style="text-align:center">Karteria 2.7.5 · <i>karteria</i>, Stoic steadfast endurance</p></div>`;
 }
 function itemSheet(kind,id){
   const K=KINDS[kind], x=id? items(kind).find(s=>s.id===id) : {name:"",dose:"",perDay:1};
@@ -993,7 +993,7 @@ async function hSync(full){
   if(full) H.backTo=null;
   const recentFrom = H.lastSync&&!full&&H.backTo!=null ? Math.max(deep,H.lastSync-3*DAY) : Math.max(deep,now-30*DAY);
   let ok=await hWindow(recentFrom, now, "Reading recent data:");
-  if(ok){ H.lastSync=now; H.hist=hist; H.heartV=1; if(H.backTo==null||H.backTo>recentFrom) H.backTo=recentFrom; hSave(); hAutoImport(); hMsg=""; hPaint(); hStatsQueue(); }
+  if(ok){ H.lastSync=now; H.hist=hist; H.heartV=2; if(H.backTo==null||H.backTo>recentFrom) H.backTo=recentFrom; hSave(); hAutoImport(); hMsg=""; hPaint(); hStatsQueue(); }
   while(ok && H.backTo>deep+DAY){
     const a=Math.max(deep,H.backTo-SYNC_STEP);
     ok=await hWindow(a, H.backTo, "Loading history, "+monLabel(a)+":");
@@ -1329,7 +1329,7 @@ function hActivity(){
 function hDaySheet(k){
   const d=H.days[k]||{}, ws=Object.values(H.workouts).filter(w=>w.d===k).sort((a,b)=>a.s-b.s), sl=Object.values(H.sleep).filter(s=>s.d===k), V=H.vitals, vit=[];
   const vv=(m,f)=>{ const x=(V[m]||{})[k]; if(x) vit.push(f(x[0])); };
-vv("fat",v=>["Body fat",r1(v)+"%"]); vv("rhr",v=>["Resting HR",Math.round(v)]); vv("hrv",v=>["HRV",Math.round(v)+" ms"]); vv("spo2",v=>["SpO₂",r1(v)+"%"]); vv("resp",v=>["Breathing",r1(v)+"/min"]); vv("vo2",v=>["VO₂ max",r1(v)]);
+vv("fat",v=>["Body fat",r1(v)+"%"]); vv("rhr",v=>["Resting HR",Math.round(v)]); if(!(V.rhr||{})[k]) vv("rhrcalc",v=>["Resting HR*",Math.round(v)]); vv("hravg",v=>["Average HR",Math.round(v)]); vv("hrsleep",v=>["Sleeping HR",Math.round(v)]); vv("hrv",v=>["HRV",Math.round(v)+" ms"]); vv("spo2",v=>["SpO₂",r1(v)+"%"]); vv("resp",v=>["Breathing",r1(v)+"/min"]); vv("vo2",v=>["VO₂ max",r1(v)]);
   if((V.bps||{})[k]&&(V.bpd||{})[k]) vit.push(["BP",Math.round(V.bps[k][0])+"/"+Math.round(V.bpd[k][0])]);
   const cells=Object.keys(HMET).filter(m=>d[m]!=null).map(m=>[HMET[m].l,HMET[m].f(hVal(k,m))+(HMET[m].u?" "+HMET[m].u:"")]);
   if(d.hrmin) cells.push(["HR range",d.hrmin+"–"+d.hrmax]);
@@ -1348,7 +1348,7 @@ vv("fat",v=>["Body fat",r1(v)+"%"]); vv("rhr",v=>["Resting HR",Math.round(v)]); 
 /* --- body & vitals --- */
 /* key, label, unit, convert, decimals, color, which way is better */
 const HVIT={
-  rhr:["Resting heart rate","bpm",v=>v,0,"var(--bad)","down"], hravg:["Average heart rate","bpm",v=>v,0,"var(--accent)","down"],
+  rhr:["Resting heart rate","bpm",v=>v,0,"var(--bad)","down"], rhrcalc:["Resting heart rate","bpm",v=>v,0,"var(--bad)","down"], hravg:["Average heart rate","bpm",v=>v,0,"var(--accent)","down"],
   hrsleep:["Sleeping heart rate","bpm",v=>v,0,"var(--med)","down"], hrlo:["Lowest heart rate","bpm",v=>v,0,"var(--carb)","down"],
   hrhi:["Highest heart rate","bpm",v=>v,0,"var(--bad)",null], hrv:["Heart rate variability","ms",v=>v,0,"var(--med)","up"],
   weight:["Weight","lb",v=>v*KG,1,"var(--accent)","down"], fat:["Body fat","%",v=>v,1,"var(--fat)","down"],
@@ -1358,14 +1358,14 @@ const hvHas = m => H.vitals[m] && Object.keys(H.vitals[m]).length>0;
 function hvAvg(m,a,z){ const v=H.vitals[m]||{}, cv=HVIT[m][2], x=Object.keys(v).filter(k=>k>=a&&k<=z).map(k=>cv(v[k][0])); return x.length? x.reduce((p,q)=>p+q,0)/x.length : null; }
 function hTrendsCard(){
   const tk=todayKey(), w0=addDays(tk,-6), p0=addDays(tk,-36), p1=addDays(tk,-7);
-  const rows=["rhr","hravg","hrsleep","hrlo","hrv","spo2","resp","vo2"].filter(hvHas).map(m=>{
+  const rows=[hvHas("rhr")?"rhr":"rhrcalc","hravg","hrsleep","hrlo","hrv","spo2","resp","vo2"].filter(hvHas).map(m=>{
     const [l,u,,dg,,better]=HVIT[m], now=hvAvg(m,w0,tk), before=hvAvg(m,p0,p1); if(now==null) return "";
     const f=v=>dg?r1(v):Math.round(v), ch=before!=null? now-before : null, flat=ch==null||Math.abs(ch)<(dg?0.2:1);
     const good= flat||!better ? null : (better==="down")===(ch<0);
-    const short={rhr:"Resting HR",hravg:"Average HR",hrsleep:"Sleeping HR",hrlo:"Lowest HR",hrv:"HRV (ms)",weight:"Weight (lb)",spo2:"SpO₂ (%)",resp:"Breathing",vo2:"VO₂ max"}[m];
+    const short={rhr:"Resting HR",rhrcalc:"Resting HR*",hravg:"Average HR",hrsleep:"Sleeping HR",hrlo:"Lowest HR",hrv:"HRV (ms)",weight:"Weight (lb)",spo2:"SpO₂ (%)",resp:"Breathing",vo2:"VO₂ max"}[m];
     return `<tr><td>${short}</td><td><b>${f(now)}</b></td><td>${before!=null?f(before):"—"}</td><td style="color:${good==null?"var(--muted)":good?"var(--good)":"var(--bad)"}">${ch==null?"—":flat?"steady":(ch>0?"↑ ":"↓ ")+f(Math.abs(ch))}</td></tr>`; }).join("");
   if(!rows) return "";
-  return `<div class="card"><h2>Trends</h2><div class="small muted" style="margin-top:-4px">Your last 7 days compared with the 30 days before. Green is the healthy direction.</div><div style="overflow-x:auto"><table class="mtab"><thead><tr><th></th><th>Last 7d</th><th>Prior 30d</th><th>Change</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+  return `<div class="card"><h2>Trends</h2><div class="small muted" style="margin-top:-4px">Your last 7 days compared with the 30 days before. Green is the healthy direction.</div><div style="overflow-x:auto"><table class="mtab"><thead><tr><th></th><th>Last 7d</th><th>Prior 30d</th><th>Change</th></tr></thead><tbody>${rows}</tbody></table></div>${!hvHas("rhr")&&hvHas("rhrcalc")?`<div class="small muted" style="margin-top:6px">* calculated by Karteria</div>`:""}</div>`;
 }
 function hVitalCard(m,from){
   const [l,u,cv,dg,c]=HVIT[m], all=H.vitals[m]; if(!all||!Object.keys(all).length) return "";
@@ -1390,11 +1390,10 @@ function hBody(){
   const now=todayKey(), from= hb.range==="all"? "0000" : addDays(now,-(+hb.range));
   let h=`<div class="seg" style="margin-bottom:12px">${[["30","30d"],["90","90d"],["365","1y"],["all","All"]].map(([v,l])=>`<button data-hbr="${v}" class="${hb.range===v?"on":""}">${l}</button>`).join("")}</div>`;
   h+=hTrendsCard();
-  const heart=["rhr","hravg"].map(m=>hVitalCard(m,from)).join("")+hRangeCard(from)+["hrsleep","hrv"].map(m=>hVitalCard(m,from)).join("");
+  const rhrCard = hvHas("rhr")? hVitalCard("rhr",from) : hvHas("rhrcalc")? hVitalCard("rhrcalc",from).replace("</h2>",`</h2><div class="small muted" style="margin:-6px 0 8px">Calculated by Karteria from your heart-rate readings. <span class="link" data-hact="rhrhow">How?</span></div>`) : "";
+  const heart=rhrCard+hVitalCard("hravg",from)+hRangeCard(from)+["hrsleep","hrv"].map(m=>hVitalCard(m,from)).join("");
   if(heart){ h+=`<div style="font-weight:700;margin:16px 4px 8px">Heart</div>`+heart;
-    if(!hvHas("rhr")&&hvHas("hravg")) h+= hGranted.includes("READ_RESTING_HEART_RATE")
-      ? `<div class="small muted" style="margin:-4px 4px 12px">Karteria can read resting heart rate, but Health Connect has no resting heart rate records for this period. Open Health Connect → Data and access → Vitals to see whether your watch app is writing any. Sleeping heart rate above is a close stand-in.</div>`
-      : `<div class="small muted" style="margin:-4px 4px 12px">Karteria isn't allowed to read <b>resting heart rate</b>. <span class="link" data-hact="perms">Allow it in Health Connect</span>, then tap ↻.</div>`; }
+    if(!hvHas("rhr")&&!hvHas("rhrcalc")&&hvHas("hravg")) h+=`<div class="small muted" style="margin:-4px 4px 12px">Resting heart rate appears after the next full sync. Tap ↻ and keep Karteria open.</div>`; }
   else if(hGranted.includes("READ_HEART_RATE")&&!hBusy) h+=`<div class="card small muted">Heart-rate trends appear after the next sync. Tap ↻ and keep Karteria open.</div>`;
   const body=hVitalCard("fat",from);   // weight is logged on the Log tab, so it isn't repeated here
   let bp=""; const bs=H.vitals.bps, bd=H.vitals.bpd;
@@ -1477,6 +1476,12 @@ function hAct(a){
   else if(a==="sync"){ if(hBusy){ toast("Already syncing"); return; } hSync(false); }
   else if(a==="settings") hSettingsSheet();
   else if(a==="perms"){ if(HC&&HC.hcManage) HC.hcManage(); }
+  else if(a==="rhrhow") sheet(`<h3>How resting heart rate is calculated</h3>
+    <p class="muted">Google Health works out resting heart rate on its own servers and doesn't share the result with Health Connect, so Karteria calculates it from your raw heart-rate readings.</p>
+    <p class="muted"><b>Each morning:</b> the lowest average heart rate over any 30-minute stretch of the night's main sleep, using 5-minute averages (at least 25 of the 30 minutes must be measured). This is the method Garmin uses, and sleep is when your heart rate is least disturbed by movement, food or caffeine.</p>
+    <p class="muted"><b>Days without sleep data:</b> the lowest 30-minute average during the day, skipping workouts and the half hour after them.</p>
+    <p class="muted">It usually reads a few beats lower than Google Health's number, which blends in calm periods during the day. Watch the trend rather than the exact value.</p>
+    <button class="btn full" id="rh-ok">OK</button>`, el=>el.querySelector("#rh-ok").onclick=closeSheet);
   else if(a==="errs") dialog({title:"What couldn't be read",text:(H.syncErrors||[]).join(" · ")||"Nothing; the last sync was fine.",ok:"OK"});
   else if(a==="history"){ toast("To see older history, allow past data for Karteria in Health Connect"); if(HC&&HC.hcManage) HC.hcManage(); }
 }
@@ -1502,7 +1507,7 @@ function hBind(q){
 }
 // keep data fresh: on launch and whenever the app comes back to the front
 setTimeout(()=>{ hRefreshGranted(); if(!hOK()||!S.settings.onboarded) return;
-  if(H.lastSync&&!H.heartV){ H.heartV=1; H.backTo=null; H.lastSync=0; hSave(); hSync(true); }   // re-read once so heart-rate trends fill in
+  if(H.lastSync&&(H.heartV||0)<2){ H.heartV=2; H.backTo=null; H.lastSync=0; hSave(); hSync(true); }   // re-read once so heart-rate trends fill in
   else if(Date.now()-H.lastSync>15*60000) hSync(false); else hStatsQueue(); }, 600);
 
 /* ---------- demo Health Connect for working on the page in a desktop browser (never used in the Android app) ---------- */
@@ -1514,7 +1519,7 @@ function demoHC(){
   const C=[44.0582,-121.3153], SRC="com.fitbit.FitbitMobile", DEV="Google Pixel Watch 3";
   let DB=null;
   function build(){
-    const R=rng(42), N=420, today=parseKey(todayKey()), W=[], days={}, V={hravg:[],hrlo:[],hrhi:[],hrsleep:[],weight:[],fat:[],rhr:[],hrv:[],spo2:[],resp:[],vo2:[],bps:[],bpd:[]}, SL=[];
+    const R=rng(42), N=420, today=parseKey(todayKey()), W=[], days={}, V={rhrcalc:[],hravg:[],hrlo:[],hrhi:[],hrsleep:[],weight:[],fat:[],rhr:[],hrv:[],spo2:[],resp:[],vo2:[],bps:[],bpd:[]}, SL=[];
     for(let i=N;i>=0;i--){
       const d=new Date(today); d.setDate(d.getDate()-i); const k=keyOf(d), dow=d.getDay(), prog=(N-i)/N;
       const plan=[];
@@ -1535,7 +1540,7 @@ function demoHC(){
       const lb=216-24*prog+Math.sin(i/9)*1.2+(R()-.5)*1.4;
       if(R()<.85) V.weight.push([k,r1(lb/KG*100)/100]);
       if(dow===1) V.fat.push([k,r1(29-5*prog+(R()-.5))]);
-      V.rhr.push([k,Math.round(62-6*prog+(R()-.5)*3)]); const ha=Math.round(76-5*prog+(R()-.5)*6+(plan.length?6:0)); V.hravg.push([k,ha]); V.hrlo.push([k,Math.round(52-4*prog+(R()-.5)*4)]); V.hrhi.push([k,Math.round(plan.length?155+R()*20:110+R()*20)]); V.hrsleep.push([k,Math.round(60-5*prog+(R()-.5)*4)]); V.hrv.push([k,r1(31+14*prog+(R()-.5)*8)]); V.spo2.push([k,r1(95.4+R()*2.4)]); V.resp.push([k,r1(14.2+R()*1.6)]);
+      V.rhr.push([k,Math.round(62-6*prog+(R()-.5)*3)]); const ha=Math.round(76-5*prog+(R()-.5)*6+(plan.length?6:0)); V.hravg.push([k,ha]); V.hrlo.push([k,Math.round(52-4*prog+(R()-.5)*4)]); V.hrhi.push([k,Math.round(plan.length?155+R()*20:110+R()*20)]); V.hrsleep.push([k,Math.round(60-5*prog+(R()-.5)*4)]); V.rhrcalc.push([k,Math.round(54-5*prog+(R()-.5)*3),"s"]); V.hrv.push([k,r1(31+14*prog+(R()-.5)*8)]); V.spo2.push([k,r1(95.4+R()*2.4)]); V.resp.push([k,r1(14.2+R()*1.6)]);
       if(dow===2) V.vo2.push([k,r1(40.8+4.2*prog+(R()-.5))]);
       if(d.getDate()%14===3){ V.bps.push([k,Math.round(132-10*prog+(R()-.5)*8)]); V.bpd.push([k,Math.round(86-6*prog+(R()-.5)*6)]); }
       // sleep ending this morning

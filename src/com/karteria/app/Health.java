@@ -2,6 +2,7 @@ package com.karteria.app;
 
 import android.content.Context;
 import android.content.pm.PackageManager;
+import android.health.connect.AggregateRecordsGroupedByDurationResponse;
 import android.health.connect.AggregateRecordsGroupedByPeriodResponse;
 import android.health.connect.AggregateRecordsRequest;
 import android.health.connect.AggregateRecordsResponse;
@@ -355,22 +356,85 @@ final class Health {
                 if (!Double.isNaN(mx)) hi.put(new JSONArray().put(d).put(Math.round(mx)));
             }
         }
+        // Resting heart rate, calculated: the lowest 30-minute average heart rate during the night's main sleep
+        // (the approach Garmin uses; validated against chest-strap ECG). Days without sleep data fall back to the
+        // lowest 30-minute average outside workouts. Heart rate is averaged in 5-minute blocks by Health Connect.
+        JSONArray calc = new JSONArray();
+        java.util.Set<String> done = new java.util.HashSet<>();
         if (has("READ_SLEEP")) {
-            reply.progress(id, "sleeping heart rate");
+            reply.progress(id, "resting heart rate");
+            Map<String, SleepSessionRecord> mainSleep = new TreeMap<>();
             for (SleepSessionRecord s : readAll(SleepSessionRecord.class, from, to)) {
                 if (s.getEndTime().getEpochSecond() - s.getStartTime().getEpochSecond() < 3 * 3600) continue;   // skip naps
-                final AggregateRecordsRequest req = new AggregateRecordsRequest.Builder<Long>(new TimeInstantRangeFilter.Builder()
-                        .setStartTime(s.getStartTime()).setEndTime(s.getEndTime()).build())
-                        .addAggregationType(HeartRateRecord.BPM_AVG).build();
-                AggregateRecordsResponse<Long> r2 = await(r -> hcm().aggregate(req, DIRECT, r));
-                Long v = r2.get(HeartRateRecord.BPM_AVG);
-                if (v != null) slp.put(new JSONArray().put(dayOf(s.getEndTime(), s.getEndZoneOffset())).put(v));
+                String d = dayOf(s.getEndTime(), s.getEndZoneOffset());
+                SleepSessionRecord prev = mainSleep.get(d);
+                if (prev == null || len(s) > len(prev)) mainSleep.put(d, s);
             }
+            for (Map.Entry<String, SleepSessionRecord> e : mainSleep.entrySet()) {
+                SleepSessionRecord s = e.getValue();
+                List<double[]> b = blocks(s.getStartTime(), s.getEndTime());
+                if (b.isEmpty()) continue;
+                double sum = 0; for (double[] x : b) sum += x[1];
+                slp.put(new JSONArray().put(e.getKey()).put(Math.round(sum / b.size())));
+                double low = lowest30(b, null);
+                if (!Double.isNaN(low)) { calc.put(new JSONArray().put(e.getKey()).put(Math.round(low)).put("s")); done.add(e.getKey()); }
+            }
+        }
+        List<long[]> workouts = new ArrayList<>();
+        if (has("READ_EXERCISE"))
+            for (ExerciseSessionRecord w : readAll(ExerciseSessionRecord.class, from, to))
+                workouts.add(new long[]{w.getStartTime().getEpochSecond() - 600, w.getEndTime().getEpochSecond() + 1800});   // plus recovery time
+        for (int i = 0; i < avg.length(); i++) {
+            String d = avg.getJSONArray(i).getString(0);
+            if (done.contains(d)) continue;
+            reply.progress(id, "resting heart rate, " + d.substring(5));
+            LocalDate day = LocalDate.parse(d);
+            List<double[]> b = blocks(day.atStartOfDay(zone).toInstant(), day.plusDays(1).atStartOfDay(zone).toInstant());
+            double low = lowest30(b, workouts);
+            if (!Double.isNaN(low)) calc.put(new JSONArray().put(d).put(Math.round(low)).put("d"));
         }
         JSONObject o = new JSONObject();
         o.put("hravg", avg); o.put("hrlo", lo); o.put("hrhi", hi);
         if (has("READ_SLEEP")) o.put("hrsleep", slp);
+        o.put("rhrcalc", calc);
         return o;
+    }
+
+    private static long len(SleepSessionRecord s) { return s.getEndTime().getEpochSecond() - s.getStartTime().getEpochSecond(); }
+
+    /** 5-minute average heart rate blocks: [start epoch second, bpm]. */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private List<double[]> blocks(Instant a, Instant b) throws Exception {
+        final AggregateRecordsRequest req = new AggregateRecordsRequest.Builder<Long>(new TimeInstantRangeFilter.Builder()
+                .setStartTime(a).setEndTime(b).build()).addAggregationType(HeartRateRecord.BPM_AVG).build();
+        List<AggregateRecordsGroupedByDurationResponse> res = (List<AggregateRecordsGroupedByDurationResponse>) (List)
+                await(r -> hcm().aggregateGroupByDuration(req, java.time.Duration.ofMinutes(5), DIRECT, (OutcomeReceiver) r));
+        List<double[]> out = new ArrayList<>();
+        for (AggregateRecordsGroupedByDurationResponse g : res) {
+            Object v = g.get(HeartRateRecord.BPM_AVG);
+            if (v != null) out.add(new double[]{g.getStartTime().getEpochSecond(), num(v)});
+        }
+        return out;
+    }
+
+    /** Lowest average over any 30-minute stretch with at least 5 of its 6 blocks measured, skipping excluded spans. */
+    private static double lowest30(List<double[]> b, List<long[]> exclude) {
+        double best = Double.NaN;
+        for (int i = 0; i < b.size(); i++) {
+            double t0 = b.get(i)[0], sum = 0;
+            int n = 0;
+            boolean bad = false;
+            for (int j = i; j < b.size() && b.get(j)[0] < t0 + 1800; j++) {
+                double t = b.get(j)[0];
+                if (exclude != null) for (long[] x : exclude) if (t + 300 > x[0] && t < x[1]) { bad = true; break; }
+                if (bad) break;
+                sum += b.get(j)[1]; n++;
+            }
+            if (bad || n < 5) continue;
+            double m = sum / n;
+            if (m >= 30 && (Double.isNaN(best) || m < best)) best = m;
+        }
+        return best;
     }
 
     private JSONArray sleep(Instant from, Instant to) throws Exception {

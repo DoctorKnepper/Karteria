@@ -45,7 +45,7 @@
 - **Workouts:** search (type, month, notes, source), filter by type and period, sort by distance, time, pace or heart rate
 - Each workout in full: heart-rate graph and time in zones, pace or speed over time, mile splits, laps, GPS route colored by heart-rate zone, elevation, and how it ranks against similar workouts
 - **Activity:** steps, distance, calories, floors and exercise minutes by week, month or year, with a step goal; tap any day to see everything from it
-- **Body:** a 7-day vs. 30-day trends table; resting, average, sleeping, lowest and highest heart rate; HRV; body fat, blood pressure, blood oxygen, breathing rate and VO₂ max
+- **Body:** a 7-day vs. 30-day trends table; resting heart rate (calculated by Karteria when the watch app doesn't share one), average, sleeping, lowest and highest heart rate; HRV; body fat, blood pressure, blood oxygen, breathing rate and VO₂ max
 - **Sleep:** last night's stages, nightly trend, average bedtime and wake time
 - Add watch workouts to your Karteria log with one tap, or automatically
 
