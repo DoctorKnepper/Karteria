@@ -1,3 +1,5 @@
+<img src="docs/icon.png" width="96" align="right" alt="Karteria icon: a weathered column against a rising sun">
+
 # Karteria
 
 **A private, offline tracker for fasting, food, weight, supplements, medications and exercise.**
@@ -99,6 +101,7 @@ assets/index.html       the whole app interface (HTML, CSS, JS)
 src/com/karteria/app/   MainActivity (WebView shell, file save/open, insets)
                         FastAlarm (fast-complete notification, survives reboot)
 res/                    icons, theme, backup exclusion rules
+docs/icon.svg           icon source (adaptive-icon background, 108dp canvas)
 build.sh                compile, package, align and sign
 ```
 

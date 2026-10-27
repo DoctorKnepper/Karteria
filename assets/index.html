@@ -856,7 +856,7 @@ function viewSettings(){
   <div class="card"><h2>Your data</h2>
     <p class="small muted" style="margin-top:0">${Object.keys(S.days).length} days logged · stored only on this phone, and never copied to Google backups. ${S.settings.lastBackup?"Last backup: "+nice(keyOf(new Date(S.settings.lastBackup)))+".":"No backup saved yet."} The app reminds you if it's been 30 days.</p>
     <div style="display:grid;gap:8px"><button class="btn" data-act="export">Save backup file</button><button class="btn sec" data-act="import">Import backup file</button><button class="btn sec" data-act="csv">Export spreadsheet (CSV)</button><button class="btn danger" data-act="reset">Erase all data</button></div>
-  </div><p class="small muted" style="text-align:center">Karteria 2.4 · <i>karteria</i>, Stoic steadfast endurance</p></div>`;
+  </div><p class="small muted" style="text-align:center">Karteria 2.5 · <i>karteria</i>, Stoic steadfast endurance</p></div>`;
 }
 function itemSheet(kind,id){
   const K=KINDS[kind], x=id? items(kind).find(s=>s.id===id) : {name:"",dose:"",perDay:1};
