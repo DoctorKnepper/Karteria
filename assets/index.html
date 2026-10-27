@@ -860,7 +860,7 @@ function viewSettings(){
   <div class="card"><h2>Your data</h2>
     <p class="small muted" style="margin-top:0">${Object.keys(S.days).length} days logged · stored only on this phone, and never copied to Google backups. ${S.settings.lastBackup?"Last backup: "+nice(keyOf(new Date(S.settings.lastBackup)))+".":"No backup saved yet."} The app reminds you if it's been 30 days.</p>
     <div style="display:grid;gap:8px"><button class="btn" data-act="export">Save backup file</button><button class="btn sec" data-act="import">Import backup file</button><button class="btn sec" data-act="csv">Export spreadsheet (CSV)</button><button class="btn danger" data-act="reset">Erase all data</button></div>
-  </div><p class="small muted" style="text-align:center">Karteria 2.7.1 · <i>karteria</i>, Stoic steadfast endurance</p></div>`;
+  </div><p class="small muted" style="text-align:center">Karteria 2.7.2 · <i>karteria</i>, Stoic steadfast endurance</p></div>`;
 }
 function itemSheet(kind,id){
   const K=KINDS[kind], x=id? items(kind).find(s=>s.id===id) : {name:"",dose:"",perDay:1};
@@ -981,8 +981,9 @@ async function hWindow(a,b,label){
   const r=await hCallT(4*60000,"hcSync",a,b);
   if(r.timeout){ hMsg="Health Connect stopped answering"+(hSyncStep?" while reading "+hSyncStep:"")+". Keep Karteria open and tap ↻ to try again."; return false; }
   if(r.error){ hMsg = r.error==="rate"? "Health Connect asked Karteria to slow down. Try again in a few minutes." : "Couldn't read Health Connect ("+r.error+")"; return false; }
+  if(r.heart) r.vitals=Object.assign(r.vitals||{}, r.heart);
   hMerge(r,a,b);
-  H.syncErrors=r.errors||null; hSave();
+  const probs=(r.errors||[]).concat(r.warnings||[]); H.syncErrors=probs.length?probs:null; hSave();
   if(r.errors){ hMsg = r.errors.some(e=>/rate$/.test(e))? "Health Connect asked Karteria to slow down. Tap ↻ in a few minutes." : "Some data couldn't be read. Keep Karteria open and tap ↻ to retry."; return false; }
   return true;
 }
@@ -992,7 +993,7 @@ async function hSync(full){
   if(full) H.backTo=null;
   const recentFrom = H.lastSync&&!full&&H.backTo!=null ? Math.max(deep,H.lastSync-3*DAY) : Math.max(deep,now-30*DAY);
   let ok=await hWindow(recentFrom, now, "Reading recent data:");
-  if(ok){ H.lastSync=now; H.hist=hist; if(H.backTo==null||H.backTo>recentFrom) H.backTo=recentFrom; hSave(); hAutoImport(); hMsg=""; hPaint(); hStatsQueue(); }
+  if(ok){ H.lastSync=now; H.hist=hist; H.heartV=1; if(H.backTo==null||H.backTo>recentFrom) H.backTo=recentFrom; hSave(); hAutoImport(); hMsg=""; hPaint(); hStatsQueue(); }
   while(ok && H.backTo>deep+DAY){
     const a=Math.max(deep,H.backTo-SYNC_STEP);
     ok=await hWindow(a, H.backTo, "Loading history, "+monLabel(a)+":");
@@ -1347,27 +1348,64 @@ function hDaySheet(k){
 }
 
 /* --- body & vitals --- */
-const HVIT=[["weight","Weight","lb",v=>v*KG,1,"var(--accent)"],["fat","Body fat","%",v=>v,1,"var(--fat)"],["rhr","Resting heart rate","bpm",v=>v,0,"var(--bad)"],["hrv","Heart rate variability","ms",v=>v,0,"var(--med)"],["spo2","Blood oxygen (SpO₂)","%",v=>v,1,"var(--carb)"],["resp","Breathing rate","per min",v=>v,1,"var(--good)"],["vo2","VO₂ max (cardio fitness)","ml/kg/min",v=>v,1,"var(--pro)"]];
+/* key, label, unit, convert, decimals, color, which way is better */
+const HVIT={
+  rhr:["Resting heart rate","bpm",v=>v,0,"var(--bad)","down"], hravg:["Average heart rate","bpm",v=>v,0,"var(--accent)","down"],
+  hrsleep:["Sleeping heart rate","bpm",v=>v,0,"var(--med)","down"], hrlo:["Lowest heart rate","bpm",v=>v,0,"var(--carb)","down"],
+  hrhi:["Highest heart rate","bpm",v=>v,0,"var(--bad)",null], hrv:["Heart rate variability","ms",v=>v,0,"var(--med)","up"],
+  weight:["Weight","lb",v=>v*KG,1,"var(--accent)","down"], fat:["Body fat","%",v=>v,1,"var(--fat)","down"],
+  spo2:["Blood oxygen (SpO₂)","%",v=>v,1,"var(--carb)","up"], resp:["Breathing rate","breaths/min",v=>v,1,"var(--good)",null],
+  vo2:["VO₂ max (cardio fitness)","ml/kg/min",v=>v,1,"var(--pro)","up"]};
+const hvHas = m => H.vitals[m] && Object.keys(H.vitals[m]).length>0;
+function hvAvg(m,a,z){ const v=H.vitals[m]||{}, cv=HVIT[m][2], x=Object.keys(v).filter(k=>k>=a&&k<=z).map(k=>cv(v[k][0])); return x.length? x.reduce((p,q)=>p+q,0)/x.length : null; }
+function hTrendsCard(){
+  const tk=todayKey(), w0=addDays(tk,-6), p0=addDays(tk,-36), p1=addDays(tk,-7);
+  const rows=["rhr","hravg","hrsleep","hrlo","hrv","weight","spo2","resp","vo2"].filter(hvHas).map(m=>{
+    const [l,u,,dg,,better]=HVIT[m], now=hvAvg(m,w0,tk), before=hvAvg(m,p0,p1); if(now==null) return "";
+    const f=v=>dg?r1(v):Math.round(v), ch=before!=null? now-before : null, flat=ch==null||Math.abs(ch)<(dg?0.2:1);
+    const good= flat||!better ? null : (better==="down")===(ch<0);
+    const short={rhr:"Resting HR",hravg:"Average HR",hrsleep:"Sleeping HR",hrlo:"Lowest HR",hrv:"HRV (ms)",weight:"Weight (lb)",spo2:"SpO₂ (%)",resp:"Breathing",vo2:"VO₂ max"}[m];
+    return `<tr><td>${short}</td><td><b>${f(now)}</b></td><td>${before!=null?f(before):"—"}</td><td style="color:${good==null?"var(--muted)":good?"var(--good)":"var(--bad)"}">${ch==null?"—":flat?"steady":(ch>0?"↑ ":"↓ ")+f(Math.abs(ch))}</td></tr>`; }).join("");
+  if(!rows) return "";
+  return `<div class="card"><h2>Trends</h2><div class="small muted" style="margin-top:-4px">Your last 7 days compared with the 30 days before. Green is the healthy direction.</div><div style="overflow-x:auto"><table class="mtab"><thead><tr><th></th><th>Last 7d</th><th>Prior 30d</th><th>Change</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
+function hVitalCard(m,from){
+  const [l,u,cv,dg,c]=HVIT[m], all=H.vitals[m]; if(!all||!Object.keys(all).length) return "";
+  const ks=Object.keys(all).filter(k=>k>=from).sort(), last=Object.keys(all).sort().pop(), fv=v=>dg?r1(v):Math.round(v);
+  if(!ks.length) return `<div class="card"><h2>${l}</h2><p class="small muted" style="margin:0">Last reading ${fv(cv(all[last][0]))} ${u} on ${fullDate(last)}.</p></div>`;
+  const vals=ks.map(k=>cv(all[k][0])), avg=vals.reduce((a,b)=>a+b,0)/vals.length, k0=ks[0];
+  const goal= m==="weight"&&S.settings.goalWeight&&Math.abs(S.settings.goalWeight-vals[vals.length-1])<40? S.settings.goalWeight : null;
+  const lo=Math.min(...vals), hi=Math.max(...vals);
+  return `<div class="card"><h2>${l} <span class="r small muted" style="text-transform:none;letter-spacing:0">${u}</span></h2><div class="stats">${stat("Latest",fv(vals[vals.length-1]))}${stat("Average",fv(avg))}${stat("Low · High",fv(lo)+" · "+fv(hi))}</div>`
+    +tsChart([{pts:ks.map((k,i)=>[dayIdx(k,k0),vals[i]]),color:c,dots:ks.length<60,gap:21}],{h:130,xmax:Math.max(1,dayIdx(ks[ks.length-1],k0)),fmt:v=>dg?r1(v):Math.round(v),xl:x=>shortD(addDays(k0,Math.round(x))),goal:goal||(ks.length>2?avg:null),goalLabel:goal?"goal":"avg"})
+    +`<div class="small muted" style="margin-top:4px">${ks.length} day${ks.length>1?"s":""} with readings · latest ${shortD(ks[ks.length-1])}</div></div>`;
+}
+function hRangeCard(from){
+  const A=H.vitals.hravg, L=H.vitals.hrlo, X=H.vitals.hrhi; if(!A) return "";
+  const ks=Object.keys(A).filter(k=>k>=from).sort(); if(ks.length<2) return "";
+  const k0=ks[0], ser=(o,c,w)=>({pts:ks.filter(k=>o&&o[k]).map(k=>[dayIdx(k,k0),o[k][0]]),color:c,w,gap:21}), av=o=>{ const x=ks.filter(k=>o&&o[k]).map(k=>o[k][0]); return x.length?Math.round(x.reduce((a,b)=>a+b,0)/x.length):"—"; };
+  return `<div class="card"><h2>Daily heart rate <span class="r small muted" style="text-transform:none;letter-spacing:0">bpm</span></h2><div class="stats">${stat("Avg low",av(L))}${stat("Avg daily",av(A))}${stat("Avg high",av(X))}</div>`
+    +tsChart([ser(X,"var(--bad)",1.4),ser(A,"var(--accent)",2.2),ser(L,"var(--carb)",1.4)],{h:150,xmax:Math.max(1,dayIdx(ks[ks.length-1],k0)),xl:x=>shortD(addDays(k0,Math.round(x)))})
+    +`<div class="legend"><span><i style="background:var(--bad)"></i>Highest</span><span><i style="background:var(--accent)"></i>Average</span><span><i style="background:var(--carb)"></i>Lowest</span></div></div>`;
+}
 function hBody(){
-  const now=todayKey(), from= hb.range==="all"? "0000" : addDays(now,-(+hb.range)), seg=`<div class="seg" style="margin-bottom:12px">${[["30","30d"],["90","90d"],["365","1y"],["all","All"]].map(([v,l])=>`<button data-hbr="${v}" class="${hb.range===v?"on":""}">${l}</button>`).join("")}</div>`;
-  let h=seg, any=false;
-  HVIT.forEach(([m,l,u,cv,dg,c])=>{
-    const all=H.vitals[m]; if(!all||!Object.keys(all).length) return; any=true;
-    const ks=Object.keys(all).filter(k=>k>=from).sort();
-    const last=Object.keys(all).sort().pop(), fv=v=>dg?r1(v):Math.round(v);
-    if(!ks.length){ h+=`<div class="card"><h2>${l}</h2><p class="small muted" style="margin:0">Last reading ${fv(cv(all[last][0]))} ${u} on ${fullDate(last)}.</p></div>`; return; }
-    const vals=ks.map(k=>cv(all[k][0])), avg=vals.reduce((a,b)=>a+b,0)/vals.length, ch=vals[vals.length-1]-vals[0], k0=ks[0];
-    const goal= m==="weight"&&S.settings.goalWeight&&Math.abs(S.settings.goalWeight-vals[vals.length-1])<40? S.settings.goalWeight : null;
-    h+=`<div class="card"><h2>${l} <span class="r small muted" style="text-transform:none;letter-spacing:0">${u}</span></h2><div class="stats">${stat("Latest",fv(vals[vals.length-1]))}${stat("Average",fv(avg))}${stat("Change",ks.length>1?(ch>0?"+":"")+fv(ch):"—")}</div>`
-      +tsChart([{pts:ks.map((k,i)=>[dayIdx(k,k0),vals[i]]),color:c,dots:ks.length<60,gap:21}],{h:130,xmax:Math.max(1,dayIdx(ks[ks.length-1],k0)),fmt:v=>dg?r1(v):Math.round(v),xl:x=>shortD(addDays(k0,Math.round(x))),goal,goalLabel:"goal"})
-      +`<div class="small muted" style="margin-top:4px">${ks.length} day${ks.length>1?"s":""} with readings · latest ${shortD(ks[ks.length-1])}</div></div>`;
-  });
-  const bs=H.vitals.bps, bd=H.vitals.bpd;
-  if(bs&&bd){ const ks=Object.keys(bs).filter(k=>k>=from&&bd[k]).sort(); if(ks.length){ any=true; const k0=ks[0];
-    h+=`<div class="card"><h2>Blood pressure</h2><div class="stats">${stat("Latest",Math.round(bs[ks[ks.length-1]][0])+"/"+Math.round(bd[ks[ks.length-1]][0]))}${stat("Average",Math.round(ks.reduce((a,k)=>a+bs[k][0],0)/ks.length)+"/"+Math.round(ks.reduce((a,k)=>a+bd[k][0],0)/ks.length))}${stat("Readings",ks.length)}</div>`
+  const now=todayKey(), from= hb.range==="all"? "0000" : addDays(now,-(+hb.range));
+  let h=`<div class="seg" style="margin-bottom:12px">${[["30","30d"],["90","90d"],["365","1y"],["all","All"]].map(([v,l])=>`<button data-hbr="${v}" class="${hb.range===v?"on":""}">${l}</button>`).join("")}</div>`;
+  h+=hTrendsCard();
+  const heart=["rhr","hravg"].map(m=>hVitalCard(m,from)).join("")+hRangeCard(from)+["hrsleep","hrv"].map(m=>hVitalCard(m,from)).join("");
+  if(heart){ h+=`<div style="font-weight:700;margin:16px 4px 8px">Heart</div>`+heart;
+    if(!hvHas("rhr")&&hvHas("hravg")) h+=`<div class="small muted" style="margin:-4px 4px 12px">No resting heart rate is being shared to Health Connect. Sleeping heart rate is a close stand-in.</div>`; }
+  else if(hGranted.includes("READ_HEART_RATE")&&!hBusy) h+=`<div class="card small muted">Heart-rate trends appear after the next sync. Tap ↻ and keep Karteria open.</div>`;
+  const body=["weight","fat"].map(m=>hVitalCard(m,from)).join("");
+  let bp=""; const bs=H.vitals.bps, bd=H.vitals.bpd;
+  if(bs&&bd){ const ks=Object.keys(bs).filter(k=>k>=from&&bd[k]).sort(); if(ks.length){ const k0=ks[0];
+    bp=`<div class="card"><h2>Blood pressure</h2><div class="stats">${stat("Latest",Math.round(bs[ks[ks.length-1]][0])+"/"+Math.round(bd[ks[ks.length-1]][0]))}${stat("Average",Math.round(ks.reduce((a,k)=>a+bs[k][0],0)/ks.length)+"/"+Math.round(ks.reduce((a,k)=>a+bd[k][0],0)/ks.length))}${stat("Readings",ks.length)}</div>`
       +tsChart([{pts:ks.map(k=>[dayIdx(k,k0),bs[k][0]]),color:"var(--bad)",dots:true},{pts:ks.map(k=>[dayIdx(k,k0),bd[k][0]]),color:"var(--carb)",dots:true}],{h:130,xmax:Math.max(1,dayIdx(ks[ks.length-1],k0)),xl:x=>shortD(addDays(k0,Math.round(x)))})
       +`<div class="legend"><span><i style="background:var(--bad)"></i>Systolic</span><span><i style="background:var(--carb)"></i>Diastolic</span></div></div>`; } }
-  if(!any) h+=`<div class="card empty-note">No body measurements found. A connected scale, or readings your watch takes overnight (resting heart rate, HRV, SpO₂, breathing rate), will appear here once they're shared with Health Connect.</div>`;
+  if(body||bp) h+=`<div style="font-weight:700;margin:16px 4px 8px">Body</div>`+body+bp;
+  const other=["spo2","resp","vo2"].map(m=>hVitalCard(m,from)).join("");
+  if(other) h+=`<div style="font-weight:700;margin:16px 4px 8px">Breathing &amp; fitness</div>`+other;
+  if(!heart&&!body&&!bp&&!other) h+=`<div class="card empty-note">No body measurements found yet.</div>`;
   return h;
 }
 
@@ -1463,7 +1501,9 @@ function hBind(q){
     sheet(`<div class="row"><h3 style="flex:1">${esc(fullDate(k))}</h3><button class="iconbtn" data-hclose aria-label="Close" style="flex:none">×</button></div>${ss.map(s=>hSleepCard(s,true)).join("")}`, el=>el.querySelector("[data-hclose]").onclick=()=>{ closeSheet(); render(); }); });
 }
 // keep data fresh: on launch and whenever the app comes back to the front
-setTimeout(()=>{ hRefreshGranted(); if(S.settings.onboarded&&hOK()&&Date.now()-H.lastSync>15*60000) hSync(false); else if(hOK()) hStatsQueue(); }, 600);
+setTimeout(()=>{ hRefreshGranted(); if(!hOK()||!S.settings.onboarded) return;
+  if(H.lastSync&&!H.heartV){ H.heartV=1; H.backTo=null; H.lastSync=0; hSave(); hSync(true); }   // re-read once so heart-rate trends fill in
+  else if(Date.now()-H.lastSync>15*60000) hSync(false); else hStatsQueue(); }, 600);
 
 /* ---------- demo Health Connect for working on the page in a desktop browser (never used in the Android app) ---------- */
 function demoOff(){ try{ localStorage.removeItem("karteria.demo"); }catch(e){} }
@@ -1474,7 +1514,7 @@ function demoHC(){
   const C=[44.0582,-121.3153], SRC="com.fitbit.FitbitMobile", DEV="Google Pixel Watch 3";
   let DB=null;
   function build(){
-    const R=rng(42), N=420, today=parseKey(todayKey()), W=[], days={}, V={weight:[],fat:[],rhr:[],hrv:[],spo2:[],resp:[],vo2:[],bps:[],bpd:[]}, SL=[];
+    const R=rng(42), N=420, today=parseKey(todayKey()), W=[], days={}, V={hravg:[],hrlo:[],hrhi:[],hrsleep:[],weight:[],fat:[],rhr:[],hrv:[],spo2:[],resp:[],vo2:[],bps:[],bpd:[]}, SL=[];
     for(let i=N;i>=0;i--){
       const d=new Date(today); d.setDate(d.getDate()-i); const k=keyOf(d), dow=d.getDay(), prog=(N-i)/N;
       const plan=[];
@@ -1495,7 +1535,7 @@ function demoHC(){
       const lb=216-24*prog+Math.sin(i/9)*1.2+(R()-.5)*1.4;
       if(R()<.85) V.weight.push([k,r1(lb/KG*100)/100]);
       if(dow===1) V.fat.push([k,r1(29-5*prog+(R()-.5))]);
-      V.rhr.push([k,Math.round(62-6*prog+(R()-.5)*3)]); V.hrv.push([k,r1(31+14*prog+(R()-.5)*8)]); V.spo2.push([k,r1(95.4+R()*2.4)]); V.resp.push([k,r1(14.2+R()*1.6)]);
+      V.rhr.push([k,Math.round(62-6*prog+(R()-.5)*3)]); const ha=Math.round(76-5*prog+(R()-.5)*6+(plan.length?6:0)); V.hravg.push([k,ha]); V.hrlo.push([k,Math.round(52-4*prog+(R()-.5)*4)]); V.hrhi.push([k,Math.round(plan.length?155+R()*20:110+R()*20)]); V.hrsleep.push([k,Math.round(60-5*prog+(R()-.5)*4)]); V.hrv.push([k,r1(31+14*prog+(R()-.5)*8)]); V.spo2.push([k,r1(95.4+R()*2.4)]); V.resp.push([k,r1(14.2+R()*1.6)]);
       if(dow===2) V.vo2.push([k,r1(40.8+4.2*prog+(R()-.5))]);
       if(d.getDate()%14===3){ V.bps.push([k,Math.round(132-10*prog+(R()-.5)*8)]); V.bpd.push([k,Math.round(86-6*prog+(R()-.5)*6)]); }
       // sleep ending this morning

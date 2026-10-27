@@ -204,6 +204,12 @@ final class Health {
             try { reply.progress(id, "sleep"); if (has("READ_SLEEP")) out.put("sleep", sleep(from, to)); }
             catch (Exception e) { errors.put("sleep: " + why(e)); }
             if (errors.length() > 0) out.put("errors", errors);
+            // heart-rate trends crunch every sample the watch recorded, so they come last and a slow or
+            // failed read only leaves a warning instead of holding up everything else
+            if (has("READ_HEART_RATE")) {
+                try { out.put("heart", heart(id, from, to)); }
+                catch (Exception e) { out.put("warnings", new JSONArray().put("heart rate: " + why(e))); }
+            }
             return out;
         });
     }
@@ -320,6 +326,51 @@ final class Health {
             daily(v, "bpd", BloodPressureRecord.class, from, to, r -> r.getDiastolic().getInMillimetersOfMercury(), 0);
         }
         return v;
+    }
+
+    /** Daily average / lowest / highest heart rate, and average heart rate while asleep each night. */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private JSONObject heart(int id, Instant from, Instant to) throws Exception {
+        JSONArray avg = new JSONArray(), lo = new JSONArray(), hi = new JSONArray(), slp = new JSONArray();
+        ZoneId zone = ZoneId.systemDefault();
+        LocalDate start = from.atZone(zone).toLocalDate(), end = to.atZone(zone).toLocalDate().plusDays(1);
+        for (LocalDate a = start; a.isBefore(end); a = a.plusDays(15)) {
+            LocalDate z = a.plusDays(15).isBefore(end) ? a.plusDays(15) : end;
+            reply.progress(id, "heart rate, " + a.getMonth().toString().substring(0, 1) + a.getMonth().toString().substring(1, 3).toLowerCase() + " " + a.getDayOfMonth());
+            AggregateRecordsRequest.Builder b = new AggregateRecordsRequest.Builder(new LocalTimeRangeFilter.Builder()
+                    .setStartTime(a.atStartOfDay()).setEndTime(z.atStartOfDay()).build());
+            b.addAggregationType(HeartRateRecord.BPM_AVG);
+            b.addAggregationType(HeartRateRecord.BPM_MIN);
+            b.addAggregationType(HeartRateRecord.BPM_MAX);
+            final AggregateRecordsRequest req = b.build();
+            List<AggregateRecordsGroupedByPeriodResponse> res =
+                    (List<AggregateRecordsGroupedByPeriodResponse>) (List) await(r -> hcm().aggregateGroupByPeriod(req, Period.ofDays(1), DIRECT, (OutcomeReceiver) r));
+            for (AggregateRecordsGroupedByPeriodResponse g : res) {
+                double v = num(g.get(HeartRateRecord.BPM_AVG));
+                if (Double.isNaN(v)) continue;
+                String d = g.getStartTime().toLocalDate().toString();
+                avg.put(new JSONArray().put(d).put(Math.round(v)));
+                double mn = num(g.get(HeartRateRecord.BPM_MIN)), mx = num(g.get(HeartRateRecord.BPM_MAX));
+                if (!Double.isNaN(mn)) lo.put(new JSONArray().put(d).put(Math.round(mn)));
+                if (!Double.isNaN(mx)) hi.put(new JSONArray().put(d).put(Math.round(mx)));
+            }
+        }
+        if (has("READ_SLEEP")) {
+            reply.progress(id, "sleeping heart rate");
+            for (SleepSessionRecord s : readAll(SleepSessionRecord.class, from, to)) {
+                if (s.getEndTime().getEpochSecond() - s.getStartTime().getEpochSecond() < 3 * 3600) continue;   // skip naps
+                final AggregateRecordsRequest req = new AggregateRecordsRequest.Builder<Long>(new TimeInstantRangeFilter.Builder()
+                        .setStartTime(s.getStartTime()).setEndTime(s.getEndTime()).build())
+                        .addAggregationType(HeartRateRecord.BPM_AVG).build();
+                AggregateRecordsResponse<Long> r2 = await(r -> hcm().aggregate(req, DIRECT, r));
+                Long v = r2.get(HeartRateRecord.BPM_AVG);
+                if (v != null) slp.put(new JSONArray().put(dayOf(s.getEndTime(), s.getEndZoneOffset())).put(v));
+            }
+        }
+        JSONObject o = new JSONObject();
+        o.put("hravg", avg); o.put("hrlo", lo); o.put("hrhi", hi);
+        if (has("READ_SLEEP")) o.put("hrsleep", slp);
+        return o;
     }
 
     private JSONArray sleep(Instant from, Instant to) throws Exception {
