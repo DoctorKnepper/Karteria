@@ -29,6 +29,12 @@ import java.nio.charset.StandardCharsets;
 public class MainActivity extends Activity {
     private static final int REQ_SAVE = 1;
     private static final int REQ_OPEN = 2;
+    private static final int REQ_HEALTH = 9;
+    private static final int REQ_ROUTE = 10;
+    private Health health;
+    private String routeSession;
+    private long routeStart;
+    private boolean openHealthPrivacy;
     private WebView web;
     private String pendingSave;
 
@@ -82,8 +88,15 @@ public class MainActivity extends Activity {
         s.setTextZoom(100);
         web.setWebViewClient(new WebViewClient() {
             @Override
-            public void onPageFinished(WebView view, String url) { pushInsets(); }
+            public void onPageFinished(WebView view, String url) {
+                pushInsets();
+                if (openHealthPrivacy) { openHealthPrivacy = false; web.evaluateJavascript("window.openHealthPrivacy && openHealthPrivacy()", null); }
+            }
         });
+        // Opened from Health Connect's "why does this app need access?" link
+        openHealthPrivacy = getIntent() != null && "android.intent.action.VIEW_PERMISSION_USAGE".equals(getIntent().getAction());
+        if (Health.supported()) health = new Health(this, (id, json) -> runOnUiThread(() ->
+                web.evaluateJavascript("window.onHealth(" + id + "," + JSONObject.quote(json) + ")", null)));
         web.setWebChromeClient(new WebChromeClient());
         web.addJavascriptInterface(new Bridge(), "Android");
         setContentView(root);
@@ -169,6 +182,58 @@ public class MainActivity extends Activity {
             }
         }
 
+        /* ---------- Health Connect (Android 14+) ---------- */
+        @JavascriptInterface
+        public boolean hcSupported() { return health != null; }
+
+        @JavascriptInterface
+        public String hcGranted() { return health == null ? "[]" : health.granted(); }
+
+        @JavascriptInterface
+        public void hcRequest() {
+            if (health == null) return;
+            runOnUiThread(() -> requestPermissions(Health.fullPerms(), REQ_HEALTH));
+        }
+
+        @JavascriptInterface
+        public void hcManage() {
+            if (health == null) return;
+            runOnUiThread(() -> {
+                try {
+                    startActivity(new Intent("android.health.connect.action.MANAGE_HEALTH_PERMISSIONS")
+                            .putExtra(Intent.EXTRA_PACKAGE_NAME, getPackageName()));
+                } catch (Exception e) {
+                    try { startActivity(new Intent("android.health.connect.action.HEALTH_HOME_SETTINGS")); } catch (Exception ignored) { }
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public void hcSync(int id, double from, double to) { if (health != null) health.sync(id, (long) from, (long) to); }
+
+        @JavascriptInterface
+        public void hcStats(int id, String sessions) { if (health != null) health.workoutStats(id, sessions); }
+
+        @JavascriptInterface
+        public void hcDetail(int id, String sessionId, double start, double end) {
+            if (health != null) health.workoutDetail(id, sessionId, (long) start, (long) end);
+        }
+
+        @JavascriptInterface
+        public void hcRoute(final String sessionId, double start) {
+            if (health == null) return;
+            routeSession = sessionId;
+            routeStart = (long) start;
+            runOnUiThread(() -> {
+                try {
+                    startActivityForResult(new Intent("android.health.connect.action.REQUEST_EXERCISE_ROUTE")
+                            .putExtra("android.health.connect.extra.SESSION_ID", sessionId), REQ_ROUTE);
+                } catch (Exception e) {
+                    web.evaluateJavascript("window.onHealthRoute(" + JSONObject.quote(sessionId) + ",null)", null);
+                }
+            });
+        }
+
         @JavascriptInterface
         public void openFile() {
             runOnUiThread(() -> {
@@ -183,6 +248,12 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQ_ROUTE) {
+            String json = (resultCode == RESULT_OK && health != null) ? Health.routeFromResult(data, routeStart) : null;
+            web.evaluateJavascript("window.onHealthRoute(" + JSONObject.quote(String.valueOf(routeSession)) + ","
+                    + (json == null ? "null" : JSONObject.quote(json)) + ")", null);
+            return;
+        }
         Uri uri = (resultCode == RESULT_OK && data != null) ? data.getData() : null;
         if (requestCode == REQ_SAVE) {
             boolean ok = false;
@@ -211,6 +282,26 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(requestCode, permissions, results);
+        if (requestCode == REQ_HEALTH && health != null)
+            web.evaluateJavascript("window.onHealthPerms && onHealthPerms(" + JSONObject.quote(health.granted()) + ")", null);
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        if (intent != null && "android.intent.action.VIEW_PERMISSION_USAGE".equals(intent.getAction()))
+            web.evaluateJavascript("window.openHealthPrivacy && openHealthPrivacy()", null);
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (health != null) health.shutdown();
+        super.onDestroy();
+    }
+
+    @Override
     public void onBackPressed() {
         web.evaluateJavascript("window.handleBack && window.handleBack()", value -> {
             if (!"true".equals(value)) finish();
@@ -221,7 +312,7 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         // re-arm with exact timing if the user just granted exact alarms
-        if (web != null) web.evaluateJavascript("window.syncFastAlarm && syncFastAlarm()", null);
+        if (web != null) web.evaluateJavascript("window.syncFastAlarm && syncFastAlarm(); window.onHealthResume && onHealthResume()", null);
     }
 
     @Override

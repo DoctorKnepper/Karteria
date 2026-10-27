@@ -2,7 +2,7 @@
 
 # Karteria
 
-**A private, offline tracker for fasting, food, weight, supplements, medications and exercise.**
+**A private, offline tracker for fasting, food, weight, supplements, medications and exercise, with a Health tab for your watch data.**
 
 *Karteria* (καρτερία) is the Stoic word for steadfast endurance: holding firm through discomfort. The app is built for people working on that kind of discipline day by day, with everything they track in one place and nothing leaving their phone.
 
@@ -40,6 +40,15 @@
 - Choose which exercises get pace or timing charts; every run is plotted as its own point
 - **Personal records** for 1 mile, 5K, 10K, half marathon and marathon: best time, pace, date and improvement over your first
 
+**Health (watch data through Health Connect, Android 14+)**
+- Reads your Pixel Watch, Fitbit or any app that shares to Health Connect; read-only, nothing leaves the phone
+- **Workouts:** search (type, month, notes, source), filter by type and period, sort by distance, time, pace or heart rate
+- Each workout in full: heart-rate graph and time in zones, pace or speed over time, mile splits, laps, GPS route colored by heart-rate zone, elevation, and how it ranks against similar workouts
+- **Activity:** steps, distance, calories, floors and exercise minutes by week, month or year, with a step goal; tap any day to see everything from it
+- **Body:** weight, body fat, resting heart rate, HRV, blood oxygen, breathing rate, VO₂ max and blood pressure trends
+- **Sleep:** last night's stages, nightly trend, average bedtime and wake time
+- Add watch workouts and weight to your Karteria log with one tap, or automatically
+
 **Progress & history**
 - Browse month by month, or switch to **All time** for a summary of improvements (weight change, pace gains, best 5K, adherence) and a month-by-month table
 - Calendar history; tap any day to view or edit it
@@ -51,7 +60,7 @@
 
 ## Privacy
 
-Karteria has no account, no server and no analytics. It doesn't request internet access at all.
+Karteria has no account, no server and no analytics. It doesn't request internet access at all. Health data is only read from Health Connect on the phone, never written, and Karteria's cached copy is left out of backup files (it can always be read again).
 
 - All data is stored on the phone, inside the app.
 - Android cloud backup and device-to-device transfer are turned **off**, so your data is never copied to Google Drive.
@@ -64,12 +73,13 @@ Permissions it asks for, and why:
 | Notifications | Telling you when your fast reaches its goal |
 | Exact alarms | Making that notification arrive on the minute (optional) |
 | Run at startup | Re-arming the fast alert after the phone restarts |
+| Health Connect (read only, each one optional) | The Health tab: exercise and routes, heart rate, steps, distance, calories, floors, elevation, speed, weight, body fat, resting heart rate, HRV, blood oxygen, breathing rate, VO₂ max, blood pressure, sleep, and past data |
 
 ## Install
 
 Download the latest `Karteria-x.y.apk` from [Releases](../../releases), open it on your Android phone and allow installing from that source when asked.
 
-Requires Android 8.0 or newer. The app targets Android 16 (API 36).
+Requires Android 8.0 or newer; the Health tab needs Android 14 or newer. For watch data, turn on Health Connect sharing in the Fitbit or Google Health app. The app targets Android 16 (API 36).
 
 ## Build from source
 
@@ -92,7 +102,7 @@ export KARTERIA_KS_ALIAS=karteria
 
 Android only installs an update over an existing copy if both are signed with the same key, so keep your release keystore safe and **never commit it** (`.gitignore` already excludes keystores, APKs and backup files).
 
-To work on the interface, open `assets/index.html` in a desktop browser. Everything except notifications and the native file picker works there, and data is kept in that browser's local storage.
+To work on the interface, open `assets/index.html` in a desktop browser. Everything except notifications and the native file picker works there, and data is kept in that browser's local storage. In a browser, Connect on the Health tab loads generated demo data instead of Health Connect.
 
 ## Project layout
 
@@ -100,6 +110,7 @@ To work on the interface, open `assets/index.html` in a desktop browser. Everyth
 assets/index.html       the whole app interface (HTML, CSS, JS)
 src/com/karteria/app/   MainActivity (WebView shell, file save/open, insets)
                         FastAlarm (fast-complete notification, survives reboot)
+                        Health (read-only Health Connect bridge, Android 14+)
 res/                    icons, theme, backup exclusion rules
 docs/icon.svg           icon source (adaptive-icon background, 108dp canvas)
 build.sh                compile, package, align and sign

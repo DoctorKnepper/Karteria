@@ -262,8 +262,10 @@ function lastWeightBefore(k){ const keys=Object.keys(S.days).filter(x=>x<k && S.
 let toastT; function toast(msg, action){ clearTimeout(toastT); let t=document.querySelector(".toast"); if(!t){t=document.createElement("div");t.className="toast";document.body.appendChild(t);}
   t.textContent=msg; if(action){ const b=document.createElement("button"); b.textContent=action.label; b.onclick=()=>{ clearTimeout(toastT); t.remove(); action.fn(); }; t.appendChild(b); }
   t.style.bottom=sheetOpen?"auto":""; t.style.top=sheetOpen?"calc(16px + var(--sat))":""; toastT=setTimeout(()=>t.remove(), action?6000:2400); }
-function removeDayEntry(k, field, idx, label){ const d=day(k); if(!d) return; const [gone]=d[field].splice(idx,1); pruneDay(k); save(); render();
-  toast(label+" removed", {label:"Undo", fn:()=>{ const dd=day(k,true); dd[field].splice(Math.min(idx,dd[field].length),0,gone); save(); render(); toast("Restored"); }}); }
+function removeDayEntry(k, field, idx, label){ const d=day(k); if(!d) return; const [gone]=d[field].splice(idx,1);
+  const hc=gone&&gone.hcId, st=S.settings.health; if(hc&&st){ st.skip=(st.skip||[]).concat(hc); }   // don't auto-add a removed watch workout again
+  pruneDay(k); save(); render();
+  toast(label+" removed", {label:"Undo", fn:()=>{ const dd=day(k,true); dd[field].splice(Math.min(idx,dd[field].length),0,gone); if(hc&&st&&st.skip) st.skip=st.skip.filter(x=>x!==hc); save(); render(); toast("Restored"); }}); }
 
 /* ---------- native bridge (Android) with browser fallback ---------- */
 const NATIVE = typeof window.Android!=="undefined";
@@ -284,7 +286,7 @@ const app=document.getElementById("app");
 
 function render(){
   if(!S.settings.onboarded){ renderOnboarding(); return; }
-  const views={today:viewToday,progress:viewProgress,history:viewHistory,settings:viewSettings};
+  const views={today:viewToday,progress:viewProgress,health:viewHealth,history:viewHistory,settings:viewSettings};
   app.innerHTML = views[tab]() + navHtml();
   bind();
   if(tab==="today") tickTimer();
@@ -292,11 +294,12 @@ function render(){
 const ICONS={
   today:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
   progress:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l5-5 4 3 8-8"/><path d="M15 7h5v5"/></svg>',
+  health:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.8 5.6a5.4 5.4 0 0 0-7.7 0L12 6.7l-1.1-1.1a5.4 5.4 0 0 0-7.7 7.7l1 1L12 21l7.8-7.7 1-1a5.4 5.4 0 0 0 0-7.7z"/><path d="M3.5 12h4l1.5-3 3 6 1.5-3h7"/></svg>',
   history:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>',
   settings:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>'
 };
 function navHtml(){
-  const t=[["today","Log"],["progress","Progress"],["history","History"],["settings","Settings"]];
+  const t=[["today","Log"],["progress","Progress"],["health","Health"],["history","History"],["settings","Settings"]];
   return '<nav class="tabs">'+t.map(([k,l])=>`<button data-tab="${k}" class="${tab===k?"on":""}">${ICONS[k]}${l}</button>`).join("")+'</nav>';
 }
 
@@ -376,7 +379,7 @@ function viewToday(){
   const wDiff = (d.weight!=null && prev!=null)? r1(d.weight-prev):null;
   h+=`<div class="card"><h2>Body ${wDiff!=null?`<span class="r badge ${wDiff<=0?"good":"warn"}">${wDiff>0?"+":""}${wDiff} lb</span>`:""}</h2>
     <div class="grid2"><div><label class="f" style="margin-top:0">Weight (lb)</label><input id="w" type="number" inputmode="decimal" step="0.1" value="${d.weight??""}" placeholder="${prev??"—"}"></div>
-    <div><label class="f" style="margin-top:0">Blood pressure</label><div class="row" style="gap:4px"><input id="bps" type="number" inputmode="numeric" value="${d.bp?d.bp.sys:""}" placeholder="sys"><span class="muted" style="flex:none">/</span><input id="bpd" type="number" inputmode="numeric" value="${d.bp?d.bp.dia:""}" placeholder="dia"></div></div></div></div>`;
+    <div><label class="f" style="margin-top:0">Blood pressure</label><div class="row" style="gap:4px"><input id="bps" type="number" inputmode="numeric" value="${d.bp?d.bp.sys:""}" placeholder="sys"><span class="muted" style="flex:none">/</span><input id="bpd" type="number" inputmode="numeric" value="${d.bp?d.bp.dia:""}" placeholder="dia"></div></div></div>${hLogHints(cur,d,"body")}</div>`;
 
   // Macros
   const st=macroStatus(d);
@@ -398,7 +401,7 @@ function viewToday(){
   if(d.exercises.length){
     h+=`<ul class="list">`+d.exercises.map((e,i)=>`<li><div class="main" data-editex="${i}"><div class="t">${esc(e.type)}</div><div class="s">${esc(exSummary(e))||"—"}${e.notes?" · "+esc(e.notes):""}</div></div><button class="x" data-delex="${i}" aria-label="Remove">×</button></li>`).join("")+`</ul>`;
   } else if(!d.rest) h+=`<p class="small muted" style="margin:0 0 4px">Nothing logged.</p>`;
-  h+=`<button class="btn full" style="margin-top:10px" data-act="addex">+ Add exercise</button></div>`;
+  h+=`${hLogHints(cur,d,"ex")}<button class="btn full" style="margin-top:10px" data-act="addex">+ Add exercise</button></div>`;
 
   // Notes
   h+=`<div class="card"><h2>Notes</h2><textarea id="notes" placeholder="How did today go?">${esc(d.notes||"")}</textarea></div>`;
@@ -857,7 +860,7 @@ function viewSettings(){
   <div class="card"><h2>Your data</h2>
     <p class="small muted" style="margin-top:0">${Object.keys(S.days).length} days logged · stored only on this phone, and never copied to Google backups. ${S.settings.lastBackup?"Last backup: "+nice(keyOf(new Date(S.settings.lastBackup)))+".":"No backup saved yet."} The app reminds you if it's been 30 days.</p>
     <div style="display:grid;gap:8px"><button class="btn" data-act="export">Save backup file</button><button class="btn sec" data-act="import">Import backup file</button><button class="btn sec" data-act="csv">Export spreadsheet (CSV)</button><button class="btn danger" data-act="reset">Erase all data</button></div>
-  </div><p class="small muted" style="text-align:center">Karteria 2.6 · <i>karteria</i>, Stoic steadfast endurance</p></div>`;
+  </div><p class="small muted" style="text-align:center">Karteria 2.7 · <i>karteria</i>, Stoic steadfast endurance</p></div>`;
 }
 function itemSheet(kind,id){
   const K=KINDS[kind], x=id? items(kind).find(s=>s.id===id) : {name:"",dose:"",perDay:1};
@@ -925,6 +928,588 @@ function exportCSV(){
   saveFile("karteria-"+todayKey()+".csv","text/csv",rows.map(r=>r.map(csvCell).join(",")).join("\n"));
 }
 
+/* ---------- HEALTH: reads Health Connect (Pixel Watch, Fitbit, Google Health, any app that shares to it) ---------- */
+const HKEY="karteria.health", MI=1609.344, KG=2.20462, FT=3.28084;
+function hBlank(){ return {v:1,days:{},workouts:{},sleep:{},vitals:{},lastSync:0}; }
+let H; try{ H=JSON.parse(localStorage.getItem(HKEY)); }catch(e){ H=null; }
+if(!H||H.v!==1) H=hBlank();
+function hSave(){ try{ localStorage.setItem(HKEY, JSON.stringify(H)); }catch(e){ toast("Not enough room to cache health data"); } }
+const hs = () => S.settings.health || (S.settings.health={});   // health preferences travel with backups; the data itself is re-read from Health Connect
+const HC_TYPES={0:"Workout",1:"Badminton",2:"Baseball",3:"Basketball",4:"Bike ride",5:"Stationary bike",6:"Boot camp",7:"Boxing",8:"Calisthenics",9:"Cricket",10:"Dancing",11:"Exercise class",12:"Fencing",13:"Football",14:"Aussie rules",15:"Frisbee",16:"Golf",17:"Guided breathing",18:"Gymnastics",19:"Handball",20:"HIIT",21:"Hike",22:"Ice hockey",23:"Ice skating",24:"Martial arts",25:"Paddling",26:"Paragliding",27:"Pilates",28:"Racquetball",29:"Rock climbing",30:"Roller hockey",31:"Rowing",32:"Rugby",33:"Run",34:"Treadmill run",35:"Sailing",36:"Scuba diving",37:"Skating",38:"Skiing",39:"Snowboarding",40:"Snowshoeing",41:"Soccer",42:"Softball",43:"Squash",44:"Stair climbing",45:"Strength training",46:"Stretching",47:"Surfing",48:"Open water swim",49:"Pool swim",50:"Table tennis",51:"Tennis",52:"Volleyball",53:"Walk",54:"Water polo",55:"Weightlifting",56:"Wheelchair",57:"Yoga",58:"Workout",59:"Stair machine",60:"Elliptical",61:"Rowing machine"};
+const PACE_T=new Set([33,34,53,21,40,56]), SPEED_T=new Set([4,5,37,38,23,25,31,61]), DIST_T=new Set([...PACE_T,...SPEED_T,48,49,60,44,59]);
+const SRC_NAMES={"com.fitbit.FitbitMobile":"Fitbit","com.google.android.apps.fitness":"Google Fit","com.google.android.apps.healthdata":"Health Connect","com.google.android.healthconnect.controller":"Health Connect","com.samsung.android.app.health":"Samsung Health","com.samsung.android.shealthpermissionmanager":"Samsung Health","com.strava":"Strava","com.google.android.apps.wearables.maestro.companion":"Pixel Watch","com.google.android.wearable.healthservices":"Pixel Watch","com.garmin.android.apps.connectmobile":"Garmin Connect","com.ouraring.oura":"Oura","com.withings.wiscale2":"Withings"};
+const srcName = p => SRC_NAMES[p] || (p? p.split(".").filter(x=>!/^(com|android|apps|app|google)$/.test(x)).map(x=>x[0].toUpperCase()+x.slice(1)).join(" ") || p : "");
+const hType = w => HC_TYPES[w.t]||"Workout";
+const hName = w => w.ti && w.ti.toLowerCase()!==hType(w).toLowerCase() && !/^(workout|exercise)$/i.test(w.ti) ? w.ti : hType(w);
+const hDur = w => Math.round((w.e-w.s)/1000);
+const hMi = w => w.st&&w.st.dist&&DIST_T.has(w.t) ? w.st.dist/MI : 0;
+const hasPaceW = w => PACE_T.has(w.t) && hMi(w)>=0.2;
+const clock = ms => new Date(ms).toLocaleTimeString([], {hour:"numeric",minute:"2-digit"});
+const mph = (m,sec) => r1(m/MI/(sec/3600));
+function ago(ms){ const m=Math.round((Date.now()-ms)/60000); if(m<1) return "just now"; if(m<60) return m+" min ago"; const h=Math.round(m/60); if(h<24) return h+"h ago"; return Math.round(h/24)+"d ago"; }
+function hDurLabel(sec){ sec=Math.round(sec); const h=Math.floor(sec/3600), m=Math.round(sec%3600/60); return h? h+"h "+pad(m)+"m" : m+" min"; }
+
+/* --- the bridge: the Android shell, or demo data when the page runs in a desktop browser --- */
+const HC = NATIVE ? (window.Android.hcSupported? window.Android : null) : demoHC();
+let hGranted=[];
+function hRefreshGranted(){ try{ hGranted = HC && HC.hcSupported()? JSON.parse(HC.hcGranted()) : []; }catch(e){ hGranted=[]; } }
+const hOK = () => hGranted.some(p=>p!=="READ_HEALTH_DATA_HISTORY");
+let hSeq=0; const hWait={};
+function hCall(fn,...args){ return new Promise(res=>{ const id=++hSeq; hWait[id]=res; try{ HC[fn](id,...args); }catch(e){ delete hWait[id]; res({error:String(e.message||e)}); } }); }
+window.onHealth=(id,json)=>{ const r=hWait[id]; if(!r) return; delete hWait[id]; let o; try{ o=JSON.parse(json); }catch(e){ o={error:"unreadable reply"}; } r(o); };
+window.onHealthPerms=json=>{ try{ hGranted=JSON.parse(json); }catch(e){} if(hOK()){ toast("Connected. Reading your health data…"); hSync(true); } else toast("No health access was allowed"); tab="health"; render(); };
+window.onHealthResume=()=>{ hRefreshGranted(); if(hOK() && Date.now()-H.lastSync>15*60000) hSync(false); };
+window.openHealthPrivacy=()=>{ tab="health"; render(); hPrivacySheet(); };
+
+/* --- sync: read a time window, replace that window in the cache --- */
+let hBusy=false, hMsg="", hStatsBusy=false;
+const DAY=86400000, YEAR=365*DAY;
+function hHistoryMs(){ return ({"1y":1,"2y":2,"5y":5,"all":12}[hs().history||"2y"]||2)*YEAR; }
+async function hSync(full){
+  if(!HC||hBusy) return; hRefreshGranted(); if(!hOK()) return;
+  hBusy=true; hMsg="Reading Health Connect…"; hPaint();
+  const now=Date.now(), hist=hGranted.includes("READ_HEALTH_DATA_HISTORY");
+  const deep=now-(hist? hHistoryMs() : 30*DAY);
+  const from = full||!H.lastSync ? deep : Math.max(deep, H.lastSync-3*DAY);
+  const r=await hCall("hcSync", from, now);
+  hBusy=false;
+  if(r.error){ hMsg = r.error==="rate"? "Health Connect asked Karteria to slow down. Try again in a few minutes." : "Couldn't read Health Connect ("+r.error+")"; hPaint(); return; }
+  hMerge(r, from, now); H.lastSync=now; H.hist=hist; hSave(); hMsg=""; hAutoImport(); hPaint(); hStatsQueue();
+}
+function hMerge(r, from, to){
+  const k0=keyOf(new Date(from)), k1=keyOf(new Date(to)), inK=k=>k>=k0&&k<=k1, inT=x=>x.s>=from&&x.s<=to;
+  if(r.days){ Object.keys(H.days).filter(inK).forEach(k=>delete H.days[k]); r.days.forEach(d=>{ const k=d.d; delete d.d; H.days[k]=d; }); }
+  if(r.workouts){ const old=H.workouts, prev={}; Object.values(old).filter(inT).forEach(w=>{ prev[w.id]=w; delete old[w.id]; });
+    r.workouts.forEach(w=>{ const p=prev[w.id]; if(p&&p.e===w.e&&p.st) w.st=p.st; old[w.id]=w; }); }   // keep already-fetched totals
+  if(r.sleep){ Object.values(H.sleep).filter(inT).forEach(s=>delete H.sleep[s.id]); r.sleep.forEach(s=>H.sleep[s.id]=s); }
+  if(r.vitals){ Object.keys(r.vitals).forEach(m=>{ const v=H.vitals[m]||(H.vitals[m]={}); Object.keys(v).filter(inK).forEach(k=>delete v[k]); r.vitals[m].forEach(([k,...x])=>v[k]=x); }); }
+}
+async function hStatsQueue(){
+  if(hStatsBusy||!HC) return; hStatsBusy=true; let n=0;
+  while(n<600){
+    const need=Object.values(H.workouts).filter(w=>!w.st).sort((a,b)=>b.s-a.s).slice(0,20);
+    if(!need.length) break;
+    const r=await hCall("hcStats", JSON.stringify(need.map(w=>({id:w.id,s:w.s,e:w.e}))));
+    if(r.error){ if(r.error==="rate") hMsg="Paused loading workout details; Health Connect asked for a break."; break; }
+    need.forEach(w=>{ if(H.workouts[w.id]) H.workouts[w.id].st=r[w.id]||{}; }); n+=need.length; hSave(); hPaint(true);
+  }
+  hStatsBusy=false; hAutoImport(); hPaint(true);
+}
+function hPaint(soft){
+  const a=document.activeElement, typing=a&&/INPUT|TEXTAREA|SELECT/.test(a.tagName);
+  if(sheetOpen||typing){ const st=document.getElementById("hstatus"); if(st) st.innerHTML=hStatus(); return; }
+  if(tab==="health"||(tab==="today"&&!soft)){ const y=window.scrollY; render(); window.scrollTo(0,y); }
+}
+function hStatus(){
+  if(hMsg) return esc(hMsg);
+  const pend=Object.values(H.workouts).filter(w=>!w.st).length;
+  return (H.lastSync? "Updated "+ago(H.lastSync) : "Not synced yet") + (pend? ` · loading details for ${pend} workout${pend>1?"s":""}…` : "")
+    + (H.lastSync&&!H.hist? ` · <span class="link" data-hact="history">Showing recent data only</span>` : "");
+}
+
+/* --- Karteria log tie-in --- */
+function hKType(t){ return ({33:["Run"],34:["Run","Machine","Treadmill"],53:["Walk"],21:["Hike"],4:["Bike"],5:["Bike","Machine","Stationary bike"],45:["Strength"],55:["Strength"],60:["Elliptical","Machine","Elliptical"],61:["Row","Machine","Rower"],31:["Row"],44:["Stair Climb"],59:["Stair Climb","Machine","Stair machine"],57:["Yoga"],20:["HIIT"],49:["Swim"],48:["Swim"]})[t] || [HC_TYPES[t]||"Workout"]; }
+function hInLog(w){ const d=S.days[w.d]; if(!d||!d.exercises) return false; const type=hKType(w.t)[0], dur=hDur(w);
+  return d.exercises.some(e=>e.hcId===w.id || (!e.hcId && e.type===type && (!e.time || Math.abs(e.time-dur)<=Math.max(180,dur*0.15)))); }
+function hAddToLog(w, quiet){
+  const [type,loc,mach]=hKType(w.t), d=day(w.d,true), st=w.st||{};
+  if(!S.settings.exerciseTypes.includes(type)) S.settings.exerciseTypes.push(type);
+  const e={type, time:hDur(w), hcId:w.id};
+  if(hMi(w)>=0.05) e.distance=Math.round(hMi(w)*100)/100;
+  if(loc){ e.location=loc; e.machine=mach; } else if(w.r) e.location="Outdoor";
+  if(st.hra) e.notes="Avg HR "+st.hra+(st.hrx?", max "+st.hrx:"");
+  d.exercises.push(e); d.rest=false;
+  if(!quiet){ save(); toast("Added "+type+" to "+(w.d===todayKey()?"today's log":nice(w.d))); }
+}
+function hAutoImport(){
+  const st=hs(); let changed=false;
+  if(st.autoEx) Object.values(H.workouts).sort((a,b)=>a.s-b.s).forEach(w=>{ if(w.d<st.autoEx||!w.st||(st.skip||[]).includes(w.id)||hInLog(w)) return; hAddToLog(w,true); changed=true; });
+  if(st.autoW) Object.entries(H.vitals.weight||{}).forEach(([k,v])=>{ if(k<st.autoW||k>todayKey()) return; const d=S.days[k]; if(d&&d.weight!=null) return; day(k,true).weight=r1(v[0]*KG); changed=true; });
+  if(changed) save();
+}
+function hLogHints(k,d,part){
+  if(!hOK()) return "";
+  if(part==="body"){ const w=(H.vitals.weight||{})[k], bs=(H.vitals.bps||{})[k], bd=(H.vitals.bpd||{})[k], out=[];
+    if(w&&d.weight==null) out.push(`<span>Health Connect: <b>${r1(w[0]*KG)} lb</b> <span class="link" data-huse="w">Use</span></span>`);
+    if(bs&&bd&&!d.bp) out.push(`<span>BP <b>${Math.round(bs[0])}/${Math.round(bd[0])}</b> <span class="link" data-huse="bp">Use</span></span>`);
+    return out.length? `<div class="small muted" style="margin-top:8px;display:flex;gap:14px;flex-wrap:wrap">${out.join("")}</div>` : ""; }
+  const ws=Object.values(H.workouts).filter(w=>w.d===k&&!hInLog(w)).sort((a,b)=>a.s-b.s);
+  if(!ws.length) return "";
+  return `<div style="margin-top:10px;padding:10px 12px;border-radius:12px;background:var(--soft)"><div class="small muted" style="font-weight:700;margin-bottom:2px">From your watch</div><ul class="list">`+ws.map(w=>`<li><div class="main" data-hw="${esc(w.id)}" style="cursor:pointer"><div class="t">${esc(hName(w))}</div><div class="s">${clock(w.s)} · ${esc(hWLine(w))}</div></div><button class="btn sec" data-hadd="${esc(w.id)}" style="padding:7px 12px;flex:none">+ Add</button></li>`).join("")+`</ul></div>`;
+}
+
+/* --- shared pieces --- */
+function hWLine(w){ const st=w.st||{}, b=[], mi=hMi(w), dur=hDur(w);
+  if(mi>=0.05) b.push(r1(mi)<10? Math.round(mi*100)/100+" mi" : r1(mi)+" mi");
+  b.push(fmtTime(dur));
+  if(hasPaceW(w)) b.push(fmtTime(dur/mi)+"/mi"); else if(SPEED_T.has(w.t)&&mi>=0.3) b.push(mph(st.dist,dur)+" mph");
+  if(st.hra) b.push("♥ "+st.hra);
+  if(st.acal) b.push(st.acal+" cal");
+  return b.join(" · "); }
+function hMaxHr(){ const set=num(hs().maxHr); if(set) return {v:set,set:true}; const top=Math.max(0,...Object.values(H.workouts).map(w=>w.st&&w.st.hrx||0)); return {v: top>=150? top : 190, set:false}; }
+const ZONES=[{n:"Warm-up",lo:.5,c:"#8ea4c2"},{n:"Easy",lo:.6,c:"var(--good)"},{n:"Aerobic",lo:.7,c:"var(--fat)"},{n:"Threshold",lo:.8,c:"#e8822d"},{n:"Max",lo:.9,c:"var(--bad)"}];
+const zoneOf = (bpm,max) => { const p=bpm/max; for(let i=ZONES.length-1;i>=0;i--) if(p>=ZONES[i].lo) return i; return -1; };
+function tsChart(series,o={}){
+  const W=340,Hh=o.h||140,L=38,R=8,T=8,B=18,iw=W-L-R,ih=Hh-T-B;
+  const ys=[]; series.forEach(s=>s.pts.forEach(p=>{ if(p[1]!=null) ys.push(p[1]); })); if(o.goal!=null) ys.push(o.goal);
+  if(!ys.length) return `<div class="empty-note">No data.</div>`;
+  let mn=o.min!=null?o.min:Math.min(...ys), mx=o.max!=null?o.max:Math.max(...ys); if(mx===mn){ mx+=1; mn-=1; }
+  const pv=(mx-mn)*.08; if(o.min==null) mn-=pv; if(o.max==null) mx+=pv;
+  const x0=o.xmin||0, xmax=o.xmax!=null?o.xmax:Math.max(1,...series.map(s=>s.pts.length?s.pts[s.pts.length-1][0]:0));
+  const X=x=>L+(x-x0)/Math.max(1e-9,xmax-x0)*iw, Y=v=> o.invert? T+(v-mn)/(mx-mn)*ih : T+ih-(v-mn)/(mx-mn)*ih;
+  let g=`<svg class="chart" viewBox="0 0 ${W} ${Hh}">`;
+  (o.bands||[]).forEach(b=>{ const a=Math.max(mn,b.from), z=Math.min(mx,b.to); if(z<=a) return; const y1=Y(z), y2=Y(a); g+=`<rect x="${L}" y="${Math.min(y1,y2)}" width="${iw}" height="${Math.abs(y2-y1)}" fill="${b.color}" opacity=".13"/>`; });
+  for(let i=0;i<=3;i++){ const v=mn+(mx-mn)*i/3, y=Y(v); let t=String(o.fmt?o.fmt(v):Math.round(v)); if(Math.abs(v)>=1000&&/^[\d,.]+$/.test(t)) t=r1(v/1000)+"k"; g+=`<line x1="${L}" x2="${W-R}" y1="${y}" y2="${y}" stroke="var(--line)"/><text x="${L-4}" y="${y+3}" text-anchor="end">${t}</text>`; }
+  const ticks=o.ticks||4; for(let i=0;i<=ticks;i++){ const x=x0+(xmax-x0)*i/ticks; g+=`<text x="${X(x)}" y="${Hh-4}" text-anchor="${i===0?"start":i===ticks?"end":"middle"}">${o.xl?o.xl(x):fmtTime(x).replace(/:\d\d$/,m=>x>=3600?"":m)}</text>`; }
+  if(o.goal!=null){ const y=Y(o.goal); g+=`<line x1="${L}" x2="${W-R}" y1="${y}" y2="${y}" stroke="var(--good)" stroke-dasharray="4 4" stroke-width="1.5"/><text x="${W-R}" y="${y-4}" text-anchor="end" style="fill:var(--good)">${esc(o.goalLabel||"")}</text>`; }
+  series.forEach(s=>{
+    let P=s.pts; const step=Math.ceil(P.length/500); if(step>1) P=P.filter((_,i)=>i%step===0||i===P.length-1);
+    if(s.bars){ const bw=Math.max(1.5,Math.min(12,iw/Math.max(1,P.length)*0.7)); P.forEach(p=>{ if(p[1]==null) return; const y=Y(p[1]), y0=Y(Math.max(mn,0)); g+=`<rect x="${X(p[0])-bw/2}" y="${Math.min(y,y0)}" width="${bw}" height="${Math.max(1,Math.abs(y0-y))}" rx="1.5" fill="${s.colorFn?s.colorFn(p[1]):s.color}"/>`; }); return; }
+    let run=[]; const flush=()=>{ if(run.length>1) g+=`<polyline points="${run.join(" ")}" fill="none" stroke="${s.color}" stroke-width="${s.w||2}" stroke-linejoin="round" stroke-linecap="round"${s.dash?' stroke-dasharray="3 3"':""}/>`; else if(run.length===1&&s.dots!==false) g+=`<circle cx="${run[0].split(",")[0]}" cy="${run[0].split(",")[1]}" r="2.5" fill="${s.color}"/>`; run=[]; };
+    let lastX=null; P.forEach(p=>{ if(p[1]==null||(s.gap&&lastX!=null&&p[0]-lastX>s.gap)) flush(); if(p[1]!=null){ run.push(X(p[0]).toFixed(1)+","+Y(p[1]).toFixed(1)); lastX=p[0]; } }); flush();
+    if(s.dots) P.forEach(p=>{ if(p[1]!=null) g+=`<circle cx="${X(p[0])}" cy="${Y(p[1])}" r="2.6" fill="${s.color}"/>`; });
+  });
+  return g+`</svg>`;
+}
+const kAdd = (k,n)=>addDays(k,n);
+const dayIdx = (k,k0) => Math.round((parseKey(k)-parseKey(k0))/DAY);
+
+/* ---------- views ---------- */
+let hTab="workouts", hw={q:"",type:"all",period:"90",sort:"new"}, ha={metric:"steps",range:"week",off:0}, hb={range:"90"}, hsl={range:"30"};
+function viewHealth(){
+  hRefreshGranted();
+  let h=`<header class="top"><h1>Health</h1>${hOK()?`<button class="iconbtn" data-hact="sync" aria-label="Sync now" ${hBusy?'style="opacity:.5"':""}>↻</button>`:""}<button class="iconbtn" data-hact="settings" aria-label="Health settings">⚙</button></header><div class="wrap">`;
+  if(!HC||!HC.hcSupported()) return h+`<div class="card"><h2>Health Connect</h2><p style="margin-top:0">The Health tab reads your watch and fitness data through Health Connect, which is built into <b>Android 14 and newer</b>. This phone is on an older version, so it isn't available here.</p><p class="small muted">Everything else in Karteria works as usual.</p></div></div>`;
+  if(!hOK()) return h+hConnectCard()+`</div>`;
+  h+=`<div class="seg" style="margin-bottom:8px">${[["workouts","Workouts"],["activity","Activity"],["body","Body"],["sleep","Sleep"]].map(([v,l])=>`<button data-htab="${v}" class="${hTab===v?"on":""}">${l}</button>`).join("")}</div>
+    <div class="small muted" id="hstatus" style="margin:0 4px 10px">${hStatus()}</div>`;
+  if(!H.lastSync && hBusy) return h+`<div class="card empty-note">Reading your health data… The first sync can take a minute.</div></div>`;
+  return h+({workouts:hWorkouts,activity:hActivity,body:hBody,sleep:hSleep}[hTab])()+`</div>`;
+}
+function hConnectCard(){
+  return `<div class="card"><h2>Connect your watch data</h2>
+    <p style="margin-top:0">See every workout, your daily activity, body measurements and sleep from your Pixel Watch or Fitbit in one place, with search and full detail for each workout.</p>
+    <ul class="small" style="padding-left:18px;margin:0 0 12px;line-height:1.6"><li><b>Workouts:</b> type, time, distance, pace, heart rate, route, calories</li><li><b>Activity:</b> steps, distance, calories, floors, exercise minutes</li><li><b>Body:</b> weight, body fat, resting heart rate, HRV, blood oxygen, breathing rate, VO₂ max, blood pressure</li><li><b>Sleep:</b> duration and stages</li></ul>
+    <button class="btn full" data-hact="connect">Connect Health Connect</button>
+    <p class="small muted" style="margin:10px 0 0">Karteria only <b>reads</b>, and nothing leaves your phone: the app has no internet access. You choose exactly what to allow, and can change it any time.${NATIVE?"":" <i>(In a desktop browser this loads demo data.)</i>"}</p></div>
+    <div class="card"><h2>Before you connect</h2><p class="small" style="margin:0">Your watch data reaches Health Connect through the Fitbit or Google Health app. Open that app's settings, find <b>Health Connect</b>, and make sure sharing is turned on. Then tap Connect above and choose <b>Allow all</b>.</p></div>`;
+}
+function hPrivacySheet(){
+  sheet(`<h3>Why Karteria asks for health access</h3><p class="muted">The Health tab shows your workouts, daily activity, body measurements and sleep, and can copy workouts and weight into your Karteria log when you ask it to.</p>
+    <p class="muted">Karteria only reads from Health Connect and never writes to it. The data is shown and cached on this phone only. The app has no internet permission, so nothing can be sent anywhere. Turn access off any time in Health Connect.</p>
+    <button class="btn full" id="hp-ok">OK</button>`, el=>el.querySelector("#hp-ok").onclick=closeSheet);
+}
+
+/* --- workouts --- */
+function hFiltered(){
+  const now=Date.now(), q=hw.q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  let L=Object.values(H.workouts).filter(w=>(hw.period==="all"||w.s>=now-(+hw.period)*DAY)&&(hw.type==="all"||String(w.t)===hw.type));
+  if(q.length) L=L.filter(w=>{ const hay=[hName(w),hType(w),w.ti,w.no,fullDate(w.d),nice(w.d),["January","February","March","April","May","June","July","August","September","October","November","December"][parseKey(w.d).getMonth()],WD[parseKey(w.d).getDay()]==="Sat"||WD[parseKey(w.d).getDay()]==="Sun"?"weekend":"",srcName(w.src),w.dev,w.st&&w.st.hra?"hr "+w.st.hra:""].join(" ").toLowerCase(); return q.every(t=>hay.includes(t)); });
+  const by={new:(a,b)=>b.s-a.s, old:(a,b)=>a.s-b.s, dist:(a,b)=>hMi(b)-hMi(a), dur:(a,b)=>hDur(b)-hDur(a), pace:(a,b)=>(hasPaceW(a)?hDur(a)/hMi(a):1e9)-(hasPaceW(b)?hDur(b)/hMi(b):1e9), hr:(a,b)=>((b.st||{}).hra||0)-((a.st||{}).hra||0)}[hw.sort];
+  return L.sort(by);
+}
+function hWorkouts(){
+  const all=Object.values(H.workouts);
+  if(!all.length) return `<div class="card empty-note">No workouts found${hGranted.includes("READ_EXERCISE")?"":". Allow <b>Exercise</b> in Health Connect to see them"}. Workouts you record on your watch will show up here.</div>`;
+  const counts={}; all.forEach(w=>counts[w.t]=(counts[w.t]||0)+1);
+  const types=Object.keys(counts).sort((a,b)=>counts[b]-counts[a]);
+  return `<div class="card"><input id="hq" type="search" placeholder="Search: run, October, Fitbit, notes…" value="${esc(hw.q)}">
+    <div class="chips" style="margin-top:10px">${[["all","All"],...types.map(t=>[t,HC_TYPES[t]||"Workout"])].map(([v,l])=>`<button class="chip ${hw.type===v?"on":""}" data-hwtype="${v}">${esc(l)}${v!=="all"?` <span style="opacity:.6">${counts[v]}</span>`:""}</button>`).join("")}</div>
+    <div class="row" style="margin-top:10px;gap:8px"><div class="seg" style="flex:1.6">${[["30","30d"],["90","90d"],["365","1y"],["all","All"]].map(([v,l])=>`<button data-hwper="${v}" class="${hw.period===v?"on":""}">${l}</button>`).join("")}</div>
+    <select id="hsort" style="flex:1">${[["new","Newest"],["old","Oldest"],["dist","Longest distance"],["dur","Longest time"],["pace","Fastest pace"],["hr","Highest heart rate"]].map(([v,l])=>`<option value="${v}" ${hw.sort===v?"selected":""}>${l}</option>`).join("")}</select></div></div>
+    <div id="hwlist">${hWorkoutList()}</div>`;
+}
+function hWorkoutList(){
+  const L=hFiltered();
+  if(!L.length) return `<div class="card empty-note">No workouts match.</div>`;
+  const mi=L.reduce((a,w)=>a+hMi(w),0), sec=L.reduce((a,w)=>a+hDur(w),0), hrs=L.filter(w=>w.st&&w.st.hra), cal=L.reduce((a,w)=>a+((w.st||{}).acal||0),0);
+  let h=`<div class="card"><div class="stats" style="margin:0">${stat("Workouts",L.length)}${stat("Miles",r1(mi))}${stat("Time",hDurLabel(sec))}</div>
+    <div class="stats" style="margin:8px 0 0">${stat("Avg HR",hrs.length?Math.round(hrs.reduce((a,w)=>a+w.st.hra*hDur(w),0)/hrs.reduce((a,w)=>a+hDur(w),0)):"—")}${stat("Active cal",cal?Math.round(cal).toLocaleString():"—")}${stat("Per week",r1(L.length/Math.max(1,(Math.max(...L.map(w=>w.s))-Math.min(...L.map(w=>w.s)))/(7*DAY)||1)))}</div>`;
+  // minutes per week (or month for long ranges)
+  const span=(Date.now()-Math.min(...L.map(w=>w.s)))/DAY, monthly=span>200;
+  const bucket=w=>{ const d=parseKey(w.d); if(monthly) return keyOf(new Date(d.getFullYear(),d.getMonth(),1)); d.setDate(d.getDate()-((d.getDay()+6)%7)); return keyOf(d); };
+  const agg={}; L.forEach(w=>{ const b=bucket(w); agg[b]=(agg[b]||0)+hDur(w)/60; });
+  const bks=[]; let k=bucket({d:keyOf(new Date(Math.min(...L.map(w=>w.s))))}); const end=bucket({d:todayKey()});
+  while(k<=end && bks.length<400){ bks.push(k); const d=parseKey(k); k = monthly? keyOf(new Date(d.getFullYear(),d.getMonth()+1,1)) : addDays(k,7); }
+  if(bks.length>1) h+=`<div style="margin-top:12px;font-weight:700;font-size:14px">Minutes per ${monthly?"month":"week"}</div>`+tsChart([{pts:bks.map((b,i)=>[i,agg[b]||0]),bars:true,color:"var(--pro)"}],{h:110,min:0,xmax:bks.length-1,ticks:Math.min(4,bks.length-1),xl:i=>{ const d=parseKey(bks[Math.round(i)]); return monthly? MO[d.getMonth()]+(d.getMonth()===0?" "+String(d.getFullYear()).slice(2):"") : shortD(bks[Math.round(i)]); }});
+  h+=`</div>`;
+  // grouped by month when sorted by date
+  const byDate=hw.sort==="new"||hw.sort==="old"; let lastM="", open=false;
+  L.slice(0,300).forEach(w=>{ const m=w.d.slice(0,7);
+    if(byDate&&m!==lastM){ if(open) h+=`</ul></div>`; const [y,mm]=m.split("-").map(Number), ms=L.filter(x=>x.d.startsWith(m)); h+=`<div class="card"><h2>${MO[mm-1]} ${y}<span class="r">${ms.length} · ${r1(ms.reduce((a,x)=>a+hMi(x),0))} mi</span></h2><ul class="list">`; open=true; lastM=m; }
+    else if(!byDate&&!open){ h+=`<div class="card"><ul class="list">`; open=true; }
+    h+=hWItem(w); });
+  if(open) h+=`</ul></div>`;
+  if(L.length>300) h+=`<div class="small muted" style="text-align:center">Showing the first 300. Narrow the search to see more.</div>`;
+  return h;
+}
+function hWItem(w){ const inLog=hInLog(w);
+  return `<li data-hw="${esc(w.id)}" style="cursor:pointer"><span class="chk on" style="background:${hColor(w.t)};border:0;font-size:11px">${esc(hType(w).slice(0,2))}</span><div class="main"><div class="t">${esc(hName(w))} ${inLog?'<span class="badge good" style="font-size:10px">in log</span>':""}</div><div class="s">${esc(nice(w.d))} · ${clock(w.s)}${w.st?"":" · loading…"}</div><div class="s">${esc(hWLine(w))}</div></div><span class="muted">›</span></li>`; }
+function hColor(t){ return PACE_T.has(t)?"var(--carb)":SPEED_T.has(t)?"var(--med)":[45,55,8,20,6].includes(t)?"var(--accent)":[57,46,27,17].includes(t)?"var(--good)":"var(--fat)"; }
+
+/* --- one workout --- */
+const hDetail={};
+async function hOpenWorkout(id){
+  const w=H.workouts[id]; if(!w) return;
+  sheet(`<div id="hwd">${hWorkoutHtml(w,null)}</div>`, el=>hBindWorkout(el,w));
+  if(!w.st){ const r=await hCall("hcStats", JSON.stringify([{id:w.id,s:w.s,e:w.e}])); if(!r.error){ w.st=r[w.id]||{}; hSave(); } }
+  if(!hDetail[id]) hDetail[id]=await hCall("hcDetail", w.id, w.s, w.e);
+  hRedrawWorkout(w);
+}
+function hRedrawWorkout(w){ const el=document.getElementById("hwd"); if(!el) return; el.innerHTML=hWorkoutHtml(w,hDetail[w.id]); hBindWorkout(el.parentNode,w); }
+window.onHealthRoute=(id,json)=>{ const w=H.workouts[id]; if(!w) return; if(json){ try{ const det=hDetail[id]||(hDetail[id]={}); det.route=JSON.parse(json); delete det.routeStatus; }catch(e){} } else toast("Route not shared"); hRedrawWorkout(w); };
+function hav(a,b){ const R=6371000, t=Math.PI/180, dLa=(b[1]-a[1])*t, dLo=(b[2]-a[2])*t, x=Math.sin(dLa/2)**2+Math.cos(a[1]*t)*Math.cos(b[1]*t)*Math.sin(dLo/2)**2; return 2*R*Math.asin(Math.sqrt(x)); }
+/* cumulative distance over time: GPS route first, else the distance records of the app that recorded the workout */
+function hCum(w,det){
+  const total=(w.st||{}).dist||0;
+  if(det.route&&det.route.length>5){ let c=0; const out=[[det.route[0][0],0]];
+    for(let i=1;i<det.route.length;i++){ const d=hav(det.route[i-1],det.route[i]); if(d<200) c+=d; out.push([det.route[i][0],c]); }
+    const f= total&&c&&total/c>0.85&&total/c<1.15 ? total/c : 1; return out.map(([t,m])=>[t,m*f]); }
+  if(det.dist&&det.dist.length){ const srcs={}; det.dist.forEach(r=>srcs[r[3]]=(srcs[r[3]]||0)+r[2]); const src=srcs[w.src]? w.src : Object.keys(srcs).sort((a,b)=>srcs[b]-srcs[a])[0];
+    const rs=det.dist.filter(r=>r[3]===src).sort((a,b)=>a[0]-b[0]); if(rs.length<2) return null; let c=0; const out=[[0,0]]; rs.forEach(r=>{ out.push([Math.max(r[0],out[out.length-1][0]),c]); c+=r[2]; out.push([r[1],c]); }); return out; }
+  return null;
+}
+function hInterp(cum,m){ for(let i=1;i<cum.length;i++) if(cum[i][1]>=m){ const [t0,m0]=cum[i-1],[t1,m1]=cum[i]; return m1===m0? t1 : t0+(t1-t0)*(m-m0)/(m1-m0); } return null; }
+function hAvgHr(hr,a,b){ let s=0,n=0; (hr||[]).forEach(([t,v])=>{ if(t>=a&&t<=b){ s+=v; n++; } }); return n? Math.round(s/n) : null; }
+function hAltAt(route,t){ if(!route||!route.length||route[0][3]==null) return null; let lo=0,hi=route.length-1; while(lo<hi){ const m=(lo+hi)>>1; if(route[m][0]<t) lo=m+1; else hi=m; } return route[lo][3]; }
+function hSplits(w,det,cum){
+  if(!cum) return [];
+  const tot=cum[cum.length-1][1], out=[]; let prevT=0;
+  for(let m=1; m*MI<=tot+1; m++){ const t=hInterp(cum,m*MI); if(t==null) break; out.push({n:m,dist:1,dur:t-prevT,a:prevT,b:t}); prevT=t; }
+  const rest=tot/MI-out.length; if(rest>=0.05){ const t=cum[cum.length-1][0]; out.push({n:out.length+1,dist:rest,dur:t-prevT,a:prevT,b:t}); }
+  out.forEach(s=>{ s.hr=hAvgHr(det.hr,s.a,s.b); const a0=hAltAt(det.route,s.a), a1=hAltAt(det.route,s.b); if(a0!=null&&a1!=null) s.elev=Math.round((a1-a0)*FT); });
+  return out;
+}
+function hPaceSeries(w,det,cum){
+  const speedy=SPEED_T.has(w.t), conv=v=> speedy? v/MI*3600 : (v>0.3? MI/v/60 : null);   // mph, or min/mi
+  if(det.speed&&det.speed.length>10){ const sp=det.speed.slice().sort((a,b)=>a[0]-b[0]); const out=[]; let q=[];
+    sp.forEach(p=>{ q.push(p); while(q.length&&p[0]-q[0][0]>30) q.shift(); out.push([p[0],conv(q.reduce((a,x)=>a+x[1],0)/q.length)]); }); return out; }
+  if(cum&&cum.length>3){ const out=[]; let j=0; for(let i=0;i<cum.length;i++){ while(j<i&&cum[i][0]-cum[j][0]>60) j++; const dt=cum[i][0]-cum[j][0], dm=cum[i][1]-cum[j][1]; if(dt>=20) out.push([cum[i][0],conv(dm/dt)]); } return out; }
+  return [];
+}
+function hZoneTimes(hr,max){ const z=ZONES.map(()=>0); if(!hr) return z; for(let i=0;i<hr.length;i++){ const dt=i+1<hr.length? Math.min(30,hr[i+1][0]-hr[i][0]) : 1, k=zoneOf(hr[i][1],max); if(k>=0) z[k]+=dt; } return z; }
+function hRouteSvg(route,hr,max){
+  const lat0=route.reduce((a,p)=>a+p[1],0)/route.length*Math.PI/180, P=route.map(p=>[p[2]*Math.cos(lat0),p[1],p[0]]);
+  const xs=P.map(p=>p[0]), ys=P.map(p=>p[1]), x0=Math.min(...xs), x1=Math.max(...xs), y0=Math.min(...ys), y1=Math.max(...ys);
+  const W=340, pad=14, sc=Math.min((W-2*pad)/Math.max(1e-9,x1-x0), 240/Math.max(1e-9,y1-y0)), Hh=Math.max(120,(y1-y0)*sc+2*pad), ox=(W-(x1-x0)*sc)/2;
+  const X=p=>(ox+(p[0]-x0)*sc).toFixed(1), Y=p=>(Hh-pad-(p[1]-y0)*sc).toFixed(1);
+  let g=`<svg class="chart" viewBox="0 0 ${W} ${Hh}" style="background:var(--soft);border-radius:12px">`, j=0, run=[], col=null;
+  const colorAt=t=>{ if(!hr||!hr.length) return "var(--accent)"; while(j+1<hr.length&&hr[j+1][0]<=t) j++; const k=zoneOf(hr[j][1],max); return k<0? ZONES[0].c : ZONES[k].c; };
+  P.forEach(p=>{ const c=colorAt(p[2]); if(c!==col&&run.length){ run.push(X(p)+","+Y(p)); g+=`<polyline points="${run.join(" ")}" fill="none" stroke="${col}" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>`; run=[]; } col=c; run.push(X(p)+","+Y(p)); });
+  if(run.length>1) g+=`<polyline points="${run.join(" ")}" fill="none" stroke="${col}" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>`;
+  const a=P[0], z=P[P.length-1];
+  g+=`<circle cx="${X(a)}" cy="${Y(a)}" r="6" fill="var(--good)" stroke="var(--card)" stroke-width="2"/><circle cx="${X(z)}" cy="${Y(z)}" r="6" fill="var(--ink)" stroke="var(--card)" stroke-width="2"/>`;
+  return g+`</svg>`;
+}
+function hSimilar(w){
+  const mi=hMi(w), dur=hDur(w);
+  return Object.values(H.workouts).filter(x=>x.t===w.t&&x.st&&(mi>=0.25? Math.abs(hMi(x)-mi)/mi<=0.2 : Math.abs(hDur(x)-dur)/dur<=0.25)).sort((a,b)=>a.s-b.s);
+}
+function hWorkoutHtml(w,det){
+  const st=w.st||{}, mi=hMi(w), dur=hDur(w), maxHr=hMaxHr();
+  let h=`<div class="row" style="align-items:flex-start"><div style="flex:1;min-width:0"><h3>${esc(hName(w))}</h3><div class="small muted">${esc(fullDate(w.d))} · ${clock(w.s)}–${clock(w.e)}</div><div class="small muted">${esc([srcName(w.src),w.dev].filter(Boolean).join(" · "))}</div></div><button class="iconbtn" data-hclose aria-label="Close" style="flex:none">×</button></div>`;
+  const cells=[];
+  if(mi>=0.05) cells.push(["Distance",(mi<10?Math.round(mi*100)/100:r1(mi))+" mi"]);
+  cells.push(["Duration",fmtTime(dur)]);
+  if(hasPaceW(w)) cells.push(["Avg pace",fmtTime(dur/mi)+"/mi"]); else if(SPEED_T.has(w.t)&&mi>=0.3) cells.push(["Avg speed",mph(st.dist,dur)+" mph"]);
+  if(st.hra) cells.push(["Avg HR",st.hra]); if(st.hrx) cells.push(["Max HR",st.hrx]);
+  if(st.acal) cells.push(["Active cal",st.acal]); else if(st.tcal) cells.push(["Calories",st.tcal]);
+  if(st.steps) cells.push(["Steps",st.steps.toLocaleString()]);
+  if(st.steps&&dur>120&&PACE_T.has(w.t)) cells.push(["Cadence",Math.round(st.steps/(dur/60))+" spm"]);
+  if(st.elev) cells.push(["Elev gain",Math.round(st.elev*FT)+" ft"]);
+  if(SPEED_T.has(w.t)&&st.spx) cells.push(["Top speed",r1(st.spx/MI*3600)+" mph"]);
+  h+=`<div class="stats" style="margin-top:12px">${cells.map(c=>stat(c[0],c[1])).join("")}</div>`;
+  if(w.no) h+=`<p class="small" style="margin:0 0 10px;white-space:pre-wrap">${esc(w.no)}</p>`;
+  h+=`<div class="row" style="gap:8px;margin-bottom:12px">${hInLog(w)?`<button class="btn sec" data-hgoday="${w.d}">✓ In your log · open day</button>`:`<button class="btn" data-hadd="${esc(w.id)}">+ Add to Karteria log</button>`}</div>`;
+  if(!det) return h+`<div class="card empty-note" style="background:var(--soft)">Loading heart rate, splits and route…</div>`;
+  if(det.error) return h+`<div class="card empty-note">Couldn't load details (${esc(det.error==="rate"?"Health Connect asked for a pause; try again shortly":det.error)}).</div>`;
+  const cum=hCum(w,det), hr=det.hr||[];
+  // heart rate
+  if(hr.length>2){
+    const zt=hZoneTimes(hr,maxHr.v), ztot=zt.reduce((a,b)=>a+b,0)||1;
+    h+=`<div class="card"><h2>Heart rate <span class="r small muted" style="text-transform:none;letter-spacing:0">max ${maxHr.v}${maxHr.set?"":" (est.)"} · <span class="link" data-hact="settings">change</span></span></h2>`
+      +tsChart([{pts:hr,color:"var(--bad)",w:1.6,gap:120}],{h:150,xmax:dur,bands:ZONES.map((z,i)=>({from:z.lo*maxHr.v,to:(ZONES[i+1]?ZONES[i+1].lo:1.2)*maxHr.v,color:z.c}))})
+      +`<div style="margin-top:10px">`+ZONES.map((z,i)=>{ const p=Math.round(zt[i]/ztot*100); return `<div class="mac" style="margin:6px 0"><div class="top"><span><i style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${z.c};margin-right:6px"></i>${z.n} <span class="small muted">${Math.round(z.lo*maxHr.v)}${ZONES[i+1]?"–"+(Math.round(ZONES[i+1].lo*maxHr.v)-1):"+"}</span></span><span><b>${hDurLabel(zt[i])}</b> <span class="small muted">${p}%</span></span></div><div class="bar" style="height:7px"><i style="width:${p}%;background:${z.c}"></i></div></div>`; }).join("")+`</div></div>`;
+  } else if(hGranted.includes("READ_HEART_RATE")) h+=`<div class="card small muted">No heart-rate samples were recorded for this workout.</div>`;
+  // pace / speed
+  const ps=hPaceSeries(w,det,cum).filter(p=>p[1]!=null&&(SPEED_T.has(w.t)? p[1]<60 : p[1]<40));
+  if(ps.length>5&&(PACE_T.has(w.t)||SPEED_T.has(w.t))){ const speedy=SPEED_T.has(w.t), vals=ps.map(p=>p[1]).sort((a,b)=>a-b), lo=vals[Math.floor(vals.length*.03)], hi=vals[Math.floor(vals.length*.97)];
+    h+=`<div class="card"><h2>${speedy?"Speed":"Pace"} <span class="r small muted" style="text-transform:none;letter-spacing:0">${speedy?"mph":"min/mi · up is faster"}</span></h2>`+tsChart([{pts:ps,color:"var(--carb)",w:1.8,gap:120}],{h:130,xmax:dur,min:lo,max:hi,invert:!speedy,fmt:v=>speedy?r1(v):fmtTime(v*60),goal:speedy?null:dur/mi/60,goalLabel:"avg"})+`</div>`; }
+  // splits
+  const sp=PACE_T.has(w.t)||SPEED_T.has(w.t)? hSplits(w,det,cum) : [];
+  if(sp.length>1){ const full=sp.filter(s=>s.dist===1), best=full.length? Math.min(...full.map(s=>s.dur)) : null;
+    h+=`<div class="card"><h2>Splits <span class="r small muted" style="text-transform:none;letter-spacing:0">per mile${det.route?"":", from watch distance"}</span></h2><table class="mtab"><thead><tr><th>Mile</th><th>Time</th><th>${SPEED_T.has(w.t)?"mph":"Pace"}</th><th>Avg HR</th>${sp.some(s=>s.elev!=null)?"<th>Elev</th>":""}</tr></thead><tbody>`
+      +sp.map(s=>`<tr${s.dur===best?' style="color:var(--good)"':""}><td>${s.dist===1?s.n:r1(s.dist)}</td><td>${fmtTime(s.dur)}</td><td>${SPEED_T.has(w.t)? r1(s.dist/(s.dur/3600)) : fmtTime(s.dur/s.dist)}</td><td>${s.hr||"—"}</td>${sp.some(x=>x.elev!=null)?`<td>${s.elev==null?"—":(s.elev>0?"+":"")+s.elev+" ft"}</td>`:""}</tr>`).join("")+`</tbody></table>${best?`<div class="small muted" style="margin-top:6px">Fastest mile in green.</div>`:""}</div>`; }
+  // laps (recorded with the lap button)
+  if(det.laps&&det.laps.length>1) h+=`<div class="card"><h2>Laps</h2><table class="mtab"><thead><tr><th>Lap</th><th>Time</th><th>Distance</th><th>Avg HR</th></tr></thead><tbody>${det.laps.map((l,i)=>`<tr><td>${i+1}</td><td>${fmtTime(l[1]-l[0])}</td><td>${l[2]?Math.round(l[2]/MI*100)/100+" mi":"—"}</td><td>${hAvgHr(hr,l[0],l[1])||"—"}</td></tr>`).join("")}</tbody></table></div>`;
+  // route & elevation
+  if(det.route&&det.route.length>3){
+    h+=`<div class="card"><h2>Route <span class="r small muted" style="text-transform:none;letter-spacing:0">${hr.length?"colored by heart-rate zone":""}</span></h2>${hRouteSvg(det.route,hr,maxHr.v)}<div class="legend"><span><i style="background:var(--good)"></i>Start</span><span><i style="background:var(--ink)"></i>Finish</span></div>`;
+    const alt=det.route.filter(p=>p[3]!=null).map(p=>[p[0],p[3]*FT]);
+    if(alt.length>10){ const lo=Math.min(...alt.map(p=>p[1])), hi=Math.max(...alt.map(p=>p[1])); h+=`<div style="margin-top:12px;font-weight:700;font-size:14px">Elevation <span class="small muted" style="font-weight:500">${Math.round(lo)}–${Math.round(hi)} ft</span></div>`+tsChart([{pts:alt,color:"var(--fat)",w:1.8}],{h:100,xmax:dur,fmt:v=>Math.round(v)}); }
+    h+=`</div>`;
+  } else if(det.routeStatus==="consent") h+=`<div class="card"><h2>Route</h2><p class="small muted" style="margin-top:0">This workout has a GPS route. Health Connect asks before sharing each one.</p><button class="btn sec" data-hroute>Show route</button></div>`;
+  // compared with similar workouts
+  const sim=hSimilar(w);
+  if(sim.length>1){ const byPace=hasPaceW(w), key=x=>byPace? hDur(x)/hMi(x) : -hDur(x), ranked=sim.slice().sort((a,b)=>key(a)-key(b)), rank=ranked.findIndex(x=>x.id===w.id)+1;
+    const ord=n=>n+(n%10===1&&n!==11?"st":n%10===2&&n!==12?"nd":n%10===3&&n!==13?"rd":"th");
+    h+=`<div class="card"><h2>Compared with similar</h2><p style="margin:0 0 6px"><b>${rank===1?(byPace?"Your fastest":"Your longest"):ord(rank)+(byPace?" fastest":" longest")}</b> of ${sim.length} ${esc(hType(w).toLowerCase())}s ${mi>=0.25?"around "+r1(mi)+" mi":"of similar length"}.</p>`;
+    if(byPace&&sim.length>2) h+=tsChart([{pts:sim.map(x=>[x.s,hDur(x)/hMi(x)/60]),color:"var(--carb)",dots:true,w:1}],{h:110,xmin:sim[0].s,xmax:sim[sim.length-1].s,invert:true,fmt:v=>fmtTime(v*60),ticks:2,xl:x=>shortD(keyOf(new Date(x)))});
+    h+=`<table class="mtab"><thead><tr><th>Date</th><th>Dist</th><th>Time</th><th>Pace</th><th>HR</th></tr></thead><tbody>`+sim.slice().reverse().slice(0,12).map(x=>`<tr data-hw="${esc(x.id)}" style="cursor:pointer;${x.id===w.id?"color:var(--accent)":""}"><td>${shortD(x.d)}${x.d.slice(0,4)!==todayKey().slice(0,4)?"/"+x.d.slice(2,4):""}</td><td>${hMi(x)?r1(hMi(x)):"—"}</td><td>${fmtTime(hDur(x))}</td><td>${hasPaceW(x)?fmtTime(hDur(x)/hMi(x)):"—"}</td><td>${(x.st||{}).hra||"—"}</td></tr>`).join("")+`</tbody></table></div>`; }
+  return h;
+}
+function hBindWorkout(el,w){
+  el.querySelectorAll("[data-hclose]").forEach(b=>b.onclick=()=>{ closeSheet(); render(); });
+  el.querySelectorAll("[data-hadd]").forEach(b=>b.onclick=()=>{ hAddToLog(w); hRedrawWorkout(w); });
+  el.querySelectorAll("[data-hgoday]").forEach(b=>b.onclick=()=>{ closeSheet(); cur=b.dataset.hgoday; tab="today"; window.scrollTo(0,0); render(); });
+  el.querySelectorAll("[data-hroute]").forEach(b=>b.onclick=()=>HC.hcRoute(w.id, w.s));
+  el.querySelectorAll("[data-hact]").forEach(b=>b.onclick=()=>{ closeSheet(); hAct(b.dataset.hact); });
+  el.querySelectorAll("tr[data-hw]").forEach(b=>b.onclick=()=>{ if(b.dataset.hw!==w.id) hOpenWorkout(b.dataset.hw); });
+}
+
+/* --- activity --- */
+const HMET={steps:{l:"Steps",f:v=>Math.round(v).toLocaleString(),c:"var(--accent)"},dist:{l:"Distance",u:"mi",cv:v=>v/MI,f:v=>r1(v),c:"var(--carb)"},acal:{l:"Active cal",f:v=>Math.round(v).toLocaleString(),c:"var(--bad)"},tcal:{l:"Total cal",f:v=>Math.round(v).toLocaleString(),c:"var(--fat)"},exmin:{l:"Exercise min",f:v=>Math.round(v),c:"var(--pro)"},floors:{l:"Floors",f:v=>Math.round(v),c:"var(--med)"}};
+const hVal=(k,m)=>{ const d=H.days[k]; if(!d||d[m]==null) return null; return HMET[m].cv? HMET[m].cv(d[m]) : d[m]; };
+function haRange(){
+  const t=parseKey(todayKey());
+  if(ha.range==="week"){ const s=new Date(t); s.setDate(t.getDate()-((t.getDay()+6)%7)+7*ha.off); const a=keyOf(s); return {a,z:addDays(a,6),label:ha.off===0?"This week":ha.off===-1?"Last week":"Week of "+nice(a)}; }
+  if(ha.range==="month"){ const s=new Date(t.getFullYear(),t.getMonth()+ha.off,1); return {a:keyOf(s),z:keyOf(new Date(s.getFullYear(),s.getMonth()+1,0)),label:MO[s.getMonth()]+" "+s.getFullYear()}; }
+  const y=t.getFullYear()+ha.off; return {a:y+"-01-01",z:y+"-12-31",label:String(y)};
+}
+function hActivity(){
+  const mets=Object.keys(HMET).filter(m=>Object.values(H.days).some(d=>d[m]!=null));
+  if(!mets.length) return `<div class="card empty-note">No daily activity found yet. Allow Steps, Distance and Calories in Health Connect.</div>`;
+  if(!mets.includes(ha.metric)) ha.metric=mets[0];
+  const M=HMET[ha.metric], R=haRange(), tk=todayKey(), keys=[]; for(let k=R.a;k<=R.z&&k<=tk;k=addDays(k,1)) keys.push(k);
+  const vals=keys.map(k=>hVal(k,ha.metric)), have=vals.filter(v=>v!=null), tot=have.reduce((a,b)=>a+b,0), goal=ha.metric==="steps"?num(hs().stepGoal):null;
+  let h=`<div class="card"><div class="chips">${mets.map(m=>`<button class="chip ${ha.metric===m?"on":""}" data-hmet="${m}">${HMET[m].l}</button>`).join("")}</div>
+    <div class="seg" style="margin-top:10px">${[["week","Week"],["month","Month"],["year","Year"]].map(([v,l])=>`<button data-hrng="${v}" class="${ha.range===v?"on":""}">${l}</button>`).join("")}</div>
+    <div class="datebar" style="margin:12px 0 4px"><button class="iconbtn" data-hoff="-1">‹</button><div class="lbl">${esc(R.label)}</div><button class="iconbtn" data-hoff="1" ${ha.off>=0?'disabled style="opacity:.3"':""}>›</button></div>`;
+  if(ha.range==="year"){
+    const months=[...Array(12)].map((_,i)=>{ const ks=keys.filter(k=>+k.slice(5,7)===i+1), v=ks.map(k=>hVal(k,ha.metric)).filter(x=>x!=null); return {i,avg:v.length?v.reduce((a,b)=>a+b,0)/v.length:null,tot:v.reduce((a,b)=>a+b,0),n:v.length}; });
+    const best=months.filter(m=>m.avg!=null).sort((a,b)=>b.avg-a.avg)[0];
+    h+=`<div class="stats">${stat("Total",M.f(tot)+(M.u?" "+M.u:""))}${stat("Daily avg",have.length?M.f(tot/have.length):"—")}${stat("Best month",best?MO[best.i]:"—")}</div>`
+      +tsChart([{pts:months.map(m=>[m.i,m.avg]),bars:true,color:M.c}],{h:150,min:0,xmax:11,ticks:11,xl:i=>MO[Math.round(i)][0],goal,goalLabel:"goal",fmt:v=>M.f(v)})
+      +`<div class="small muted" style="margin-top:4px">Daily average for each month.</div></div>`
+      +`<div class="card"><table class="mtab"><thead><tr><th>Month</th><th>Daily avg</th><th>Total</th><th>Days</th></tr></thead><tbody>${months.filter(m=>m.n).reverse().map(m=>`<tr data-hmonth="${R.a.slice(0,4)}-${m.i}" style="cursor:pointer"><td>${MO[m.i]} ›</td><td>${M.f(m.avg)}</td><td>${M.f(m.tot)}</td><td>${m.n}</td></tr>`).join("")}</tbody></table></div>`;
+    return h;
+  }
+  const best=have.length?Math.max(...have):null, bk=best!=null? keys[vals.indexOf(best)] : null;
+  h+=`<div class="stats">${stat("Total",M.f(tot)+(M.u?" "+M.u:""))}${stat("Daily avg",have.length?M.f(tot/have.length):"—")}${stat("Best day",bk?M.f(best):"—")}</div>`
+    +tsChart([{pts:vals.map((v,i)=>[i,v]),bars:true,color:M.c,colorFn:goal?(v=>v>=goal?"var(--good)":M.c):null}],{h:150,min:0,xmax:Math.max(1,(ha.range==="week"?7:keys.length)-1),ticks:ha.range==="week"?6:4,xl:i=>{ const k=keys[Math.round(i)]; return k? (ha.range==="week"?WD[parseKey(k).getDay()]:shortD(k)) : ""; },goal,goalLabel:"goal "+(goal||"").toLocaleString(),fmt:v=>M.f(v)});
+  if(goal) h+=`<div class="small muted" style="margin-top:4px">${have.filter(v=>v>=goal).length} of ${have.length} days at or above your step goal.</div>`;
+  h+=`</div><div class="card"><h2>Days <span class="r small muted" style="text-transform:none;letter-spacing:0">tap a day for everything</span></h2><div style="overflow-x:auto"><table class="mtab"><thead><tr><th>Day</th>${mets.map(m=>`<th>${HMET[m].l.replace(" cal"," cal").replace("Exercise min","Ex min")}</th>`).join("")}</tr></thead><tbody>`
+    +keys.slice().reverse().map(k=>`<tr data-hday="${k}" style="cursor:pointer"><td>${WD[parseKey(k).getDay()]} ${shortD(k)}</td>${mets.map(m=>{ const v=hVal(k,m); return `<td>${v==null?"—":HMET[m].f(v)}</td>`; }).join("")}</tr>`).join("")+`</tbody></table></div></div>`;
+  return h;
+}
+function hDaySheet(k){
+  const d=H.days[k]||{}, ws=Object.values(H.workouts).filter(w=>w.d===k).sort((a,b)=>a.s-b.s), sl=Object.values(H.sleep).filter(s=>s.d===k), V=H.vitals, vit=[];
+  const vv=(m,f)=>{ const x=(V[m]||{})[k]; if(x) vit.push(f(x[0])); };
+  vv("weight",v=>["Weight",r1(v*KG)+" lb"]); vv("fat",v=>["Body fat",r1(v)+"%"]); vv("rhr",v=>["Resting HR",Math.round(v)]); vv("hrv",v=>["HRV",Math.round(v)+" ms"]); vv("spo2",v=>["SpO₂",r1(v)+"%"]); vv("resp",v=>["Breathing",r1(v)+"/min"]); vv("vo2",v=>["VO₂ max",r1(v)]);
+  if((V.bps||{})[k]&&(V.bpd||{})[k]) vit.push(["BP",Math.round(V.bps[k][0])+"/"+Math.round(V.bpd[k][0])]);
+  const cells=Object.keys(HMET).filter(m=>d[m]!=null).map(m=>[HMET[m].l,HMET[m].f(hVal(k,m))+(HMET[m].u?" "+HMET[m].u:"")]);
+  if(d.hrmin) cells.push(["HR range",d.hrmin+"–"+d.hrmax]);
+  sheet(`<div class="row"><h3 style="flex:1">${esc(fullDate(k))}</h3><button class="iconbtn" data-hclose aria-label="Close" style="flex:none">×</button></div>
+    ${cells.length?`<div class="stats" style="margin-top:10px">${cells.map(c=>stat(c[0],c[1])).join("")}</div>`:`<p class="muted">No activity recorded.</p>`}
+    ${vit.length?`<div style="font-weight:700;margin:6px 0">Body</div><div class="stats">${vit.map(c=>stat(c[0],c[1])).join("")}</div>`:""}
+    ${sl.length?`<div style="font-weight:700;margin:6px 0">Sleep (night before)</div>${sl.map(s=>hSleepCard(s,true)).join("")}`:""}
+    ${ws.length?`<div style="font-weight:700;margin:6px 0">Workouts</div><ul class="list">${ws.map(hWItem).join("")}</ul>`:""}
+    <button class="btn sec full" style="margin-top:12px" data-hgoday="${k}">Open this day in your log</button>`, el=>{
+    el.querySelector("[data-hclose]").onclick=()=>{ closeSheet(); render(); };
+    el.querySelectorAll("[data-hw]").forEach(b=>b.onclick=()=>hOpenWorkout(b.dataset.hw));
+    el.querySelector("[data-hgoday]").onclick=()=>{ closeSheet(); cur=k; tab="today"; window.scrollTo(0,0); render(); };
+  });
+}
+
+/* --- body & vitals --- */
+const HVIT=[["weight","Weight","lb",v=>v*KG,1,"var(--accent)"],["fat","Body fat","%",v=>v,1,"var(--fat)"],["rhr","Resting heart rate","bpm",v=>v,0,"var(--bad)"],["hrv","Heart rate variability","ms",v=>v,0,"var(--med)"],["spo2","Blood oxygen (SpO₂)","%",v=>v,1,"var(--carb)"],["resp","Breathing rate","per min",v=>v,1,"var(--good)"],["vo2","VO₂ max (cardio fitness)","ml/kg/min",v=>v,1,"var(--pro)"]];
+function hBody(){
+  const now=todayKey(), from= hb.range==="all"? "0000" : addDays(now,-(+hb.range)), seg=`<div class="seg" style="margin-bottom:12px">${[["30","30d"],["90","90d"],["365","1y"],["all","All"]].map(([v,l])=>`<button data-hbr="${v}" class="${hb.range===v?"on":""}">${l}</button>`).join("")}</div>`;
+  let h=seg, any=false;
+  HVIT.forEach(([m,l,u,cv,dg,c])=>{
+    const all=H.vitals[m]; if(!all||!Object.keys(all).length) return; any=true;
+    const ks=Object.keys(all).filter(k=>k>=from).sort();
+    const last=Object.keys(all).sort().pop(), fv=v=>dg?r1(v):Math.round(v);
+    if(!ks.length){ h+=`<div class="card"><h2>${l}</h2><p class="small muted" style="margin:0">Last reading ${fv(cv(all[last][0]))} ${u} on ${fullDate(last)}.</p></div>`; return; }
+    const vals=ks.map(k=>cv(all[k][0])), avg=vals.reduce((a,b)=>a+b,0)/vals.length, ch=vals[vals.length-1]-vals[0], k0=ks[0];
+    const goal= m==="weight"&&S.settings.goalWeight&&Math.abs(S.settings.goalWeight-vals[vals.length-1])<40? S.settings.goalWeight : null;
+    h+=`<div class="card"><h2>${l} <span class="r small muted" style="text-transform:none;letter-spacing:0">${u}</span></h2><div class="stats">${stat("Latest",fv(vals[vals.length-1]))}${stat("Average",fv(avg))}${stat("Change",ks.length>1?(ch>0?"+":"")+fv(ch):"—")}</div>`
+      +tsChart([{pts:ks.map((k,i)=>[dayIdx(k,k0),vals[i]]),color:c,dots:ks.length<60,gap:21}],{h:130,xmax:Math.max(1,dayIdx(ks[ks.length-1],k0)),fmt:v=>dg?r1(v):Math.round(v),xl:x=>shortD(addDays(k0,Math.round(x))),goal,goalLabel:"goal"})
+      +`<div class="small muted" style="margin-top:4px">${ks.length} day${ks.length>1?"s":""} with readings · latest ${shortD(ks[ks.length-1])}</div></div>`;
+  });
+  const bs=H.vitals.bps, bd=H.vitals.bpd;
+  if(bs&&bd){ const ks=Object.keys(bs).filter(k=>k>=from&&bd[k]).sort(); if(ks.length){ any=true; const k0=ks[0];
+    h+=`<div class="card"><h2>Blood pressure</h2><div class="stats">${stat("Latest",Math.round(bs[ks[ks.length-1]][0])+"/"+Math.round(bd[ks[ks.length-1]][0]))}${stat("Average",Math.round(ks.reduce((a,k)=>a+bs[k][0],0)/ks.length)+"/"+Math.round(ks.reduce((a,k)=>a+bd[k][0],0)/ks.length))}${stat("Readings",ks.length)}</div>`
+      +tsChart([{pts:ks.map(k=>[dayIdx(k,k0),bs[k][0]]),color:"var(--bad)",dots:true},{pts:ks.map(k=>[dayIdx(k,k0),bd[k][0]]),color:"var(--carb)",dots:true}],{h:130,xmax:Math.max(1,dayIdx(ks[ks.length-1],k0)),xl:x=>shortD(addDays(k0,Math.round(x)))})
+      +`<div class="legend"><span><i style="background:var(--bad)"></i>Systolic</span><span><i style="background:var(--carb)"></i>Diastolic</span></div></div>`; } }
+  if(!any) h+=`<div class="card empty-note">No body measurements found. A connected scale, or readings your watch takes overnight (resting heart rate, HRV, SpO₂, breathing rate), will appear here once they're shared with Health Connect.</div>`;
+  return h;
+}
+
+/* --- sleep --- */
+const SLEEP_ST={1:["Awake",0],3:["Awake",0],7:["Awake",0],6:["REM",1],4:["Light",2],2:["Asleep",2],0:["Asleep",2],5:["Deep",3]};
+const SLEEP_C=["var(--fat)","var(--carb)","color-mix(in srgb,var(--carb) 45%,var(--card))","var(--med)"];
+function hSleepSum(s){ const t={awake:0,rem:0,light:0,deep:0,asleep:0}; const bed=(s.e-s.s)/1000;
+  if(!s.st||!s.st.length){ t.asleep=bed; } else s.st.forEach(([ty,,d])=>{ const n=(SLEEP_ST[ty]||["Asleep"])[0].toLowerCase(); t[n]+=d; });
+  t.sleep=t.rem+t.light+t.deep+t.asleep; t.bed=bed; t.staged=!!(s.st&&s.st.some(x=>[4,5,6].includes(x[0]))); return t; }
+function hHypno(s){
+  if(!s.st||!s.st.length) return "";
+  const W=340,Hh=110,L=44,iw=W-L-6,rh=20,tot=(s.e-s.s)/1000, X=t=>L+t/tot*iw;
+  let g=`<svg class="chart" viewBox="0 0 ${W} ${Hh}">`; ["Awake","REM","Light","Deep"].forEach((n,i)=>g+=`<text x="${L-6}" y="${8+i*rh+rh/2+3}" text-anchor="end">${n}</text><line x1="${L}" x2="${W-6}" y1="${8+i*rh+rh/2}" y2="${8+i*rh+rh/2}" stroke="var(--line)"/>`);
+  s.st.forEach(([ty,a,d])=>{ const row=(SLEEP_ST[ty]||["",2])[1]; g+=`<rect x="${X(a)}" y="${8+row*rh+2}" width="${Math.max(1,X(a+d)-X(a))}" height="${rh-4}" rx="2" fill="${SLEEP_C[row]}"/>`; });
+  for(let i=0;i<=3;i++){ const t=tot*i/3; g+=`<text x="${X(t)}" y="${Hh-4}" text-anchor="${i===0?"start":i===3?"end":"middle"}">${clock(s.s+t*1000)}</text>`; }
+  return g+`</svg>`;
+}
+function hSleepCard(s,compact){ const t=hSleepSum(s), p=x=>Math.round(x/Math.max(1,t.sleep)*100);
+  return `<div class="card" style="${compact?"background:var(--soft)":""}"><div class="row" style="align-items:baseline"><div><div class="big" style="font-size:28px">${hDurLabel(t.sleep)}</div><div class="small muted">asleep · ${clock(s.s)} → ${clock(s.e)} · ${hDurLabel(t.bed)} in bed</div></div></div>
+    ${hHypno(s)}${t.staged?`<div class="stats" style="margin:8px 0 0">${stat("Deep · "+p(t.deep)+"%",hDurLabel(t.deep))}${stat("REM · "+p(t.rem)+"%",hDurLabel(t.rem))}${stat("Light · "+p(t.light)+"%",hDurLabel(t.light))}</div><div class="small muted">Awake ${hDurLabel(t.awake)} · ${esc(srcName(s.src))}</div>`:`<div class="small muted" style="margin-top:6px">${esc(srcName(s.src))}${s.st&&s.st.length?"":" · no stage data"}</div>`}</div>`; }
+function hSleep(){
+  const nights={}; Object.values(H.sleep).forEach(s=>{ (nights[s.d]=nights[s.d]||[]).push(s); });
+  const ks=Object.keys(nights).sort(); if(!ks.length) return `<div class="card empty-note">No sleep found. Wear your watch to bed and sleep will show up here the next morning.</div>`;
+  const main=k=>nights[k].slice().sort((a,b)=>(b.e-b.s)-(a.e-a.s))[0], last=ks[ks.length-1];
+  let h=`<div style="font-weight:700;margin:0 4px 6px">${last===todayKey()?"Last night":esc(nice(last))}</div>${hSleepCard(main(last))}`;
+  const from=addDays(todayKey(),-(+hsl.range)), rk=ks.filter(k=>k>=from);
+  h+=`<div class="card"><h2>Trend</h2><div class="seg" style="margin-bottom:10px">${[["7","7d"],["30","30d"],["90","90d"],["365","1y"]].map(([v,l])=>`<button data-hsr="${v}" class="${hsl.range===v?"on":""}">${l}</button>`).join("")}</div>`;
+  if(rk.length){ const sums=rk.map(k=>nights[k].reduce((a,s)=>{ const t=hSleepSum(s); Object.keys(t).forEach(x=>a[x]=(a[x]||0)+(+t[x]||0)); return a; },{}));
+    const avg=f=>sums.reduce((a,t)=>a+t[f],0)/sums.length, staged=sums.filter(t=>t.deep+t.rem+t.light>0);
+    const clockAvg=f=>{ const m=rk.map(k=>{ const d=new Date(main(k)[f]); let x=d.getHours()*60+d.getMinutes(); if(f==="s"&&x<12*60) x+=1440; return x; }); const a=Math.round(m.reduce((p,q)=>p+q,0)/m.length)%1440; return clock(new Date(2000,0,1,Math.floor(a/60),a%60).getTime()); };
+    const k0=from, hrs=rk.map((k,i)=>[dayIdx(k,k0),sums[i].sleep/3600]);
+    h+=`<div class="stats">${stat("Avg asleep",hDurLabel(avg("sleep")))}${stat("Avg bedtime",clockAvg("s"))}${stat("Avg wake",clockAvg("e"))}</div>`
+      +tsChart([{pts:hrs,bars:true,color:"var(--med)",colorFn:v=>v>=7?"var(--med)":"color-mix(in srgb,var(--med) 50%,var(--card))"}],{h:140,min:0,xmax:+hsl.range,xl:x=>shortD(addDays(k0,Math.round(x))),goal:avg("sleep")/3600,goalLabel:"avg",fmt:v=>r1(v)+"h"});
+    if(staged.length) h+=`<div class="stats" style="margin:10px 0 0">${stat("Avg deep",hDurLabel(staged.reduce((a,t)=>a+t.deep,0)/staged.length))}${stat("Avg REM",hDurLabel(staged.reduce((a,t)=>a+t.rem,0)/staged.length))}${stat("Nights 7h+",sums.filter(t=>t.sleep>=7*3600).length+"/"+sums.length)}</div>`;
+  } else h+=`<div class="empty-note">No sleep in this range.</div>`;
+  h+=`</div><div class="card"><h2>Nights</h2><ul class="list">`+ks.slice().reverse().slice(0,60).map(k=>{ const t=nights[k].map(hSleepSum).reduce((a,x)=>({sleep:a.sleep+x.sleep,deep:a.deep+x.deep,rem:a.rem+x.rem}),{sleep:0,deep:0,rem:0}), m=main(k);
+    return `<li data-hsleep="${k}" style="cursor:pointer"><div class="main"><div class="t">${esc(nice(k))}</div><div class="s">${clock(m.s)} → ${clock(m.e)}${t.deep?" · deep "+hDurLabel(t.deep)+" · REM "+hDurLabel(t.rem):""}${nights[k].length>1?" · +nap":""}</div></div><b style="font-variant-numeric:tabular-nums">${hDurLabel(t.sleep)}</b><span class="muted">›</span></li>`; }).join("")+`</ul></div>`;
+  return h;
+}
+
+/* --- settings --- */
+function hSettingsSheet(){
+  const st=hs(), mx=hMaxHr(), srcs={}; Object.values(H.workouts).forEach(w=>srcs[srcName(w.src)]=(srcs[srcName(w.src)]||0)+1);
+  sheet(`<h3>Health settings</h3>
+    <div class="grid2"><div><label class="f">Max heart rate</label><input id="hs-mx" type="number" inputmode="numeric" value="${st.maxHr||""}" placeholder="${mx.v}"></div><div><label class="f">Daily step goal</label><input id="hs-sg" type="number" inputmode="numeric" value="${st.stepGoal||""}" placeholder="e.g. 8000"></div></div>
+    <p class="small muted" style="margin:4px 0 0">Heart-rate zones use your max heart rate. Blank uses the highest reading from your workouts${mx.set?"":" ("+mx.v+")"}.</p>
+    <label class="f">How far back to read</label><div class="seg" id="hs-hist">${[["1y","1 year"],["2y","2 years"],["5y","5 years"],["all","All"]].map(([v,l])=>`<button data-v="${v}" class="${(st.history||"2y")===v?"on":""}">${l}</button>`).join("")}</div>
+    ${H.lastSync&&!H.hist?`<p class="small muted" style="margin:6px 0 0">Health Connect is only sharing recent data. To see older history, allow <b>past data</b> for Karteria in Health Connect (Android 15 and newer).</p>`:""}
+    <label class="row" style="gap:10px;margin-top:14px;align-items:flex-start"><input type="checkbox" id="hs-ax" ${st.autoEx?"checked":""} style="width:22px;height:22px;flex:none;margin-top:2px"><span><b>Add new watch workouts to my log</b><br><span class="small muted">From today on. Older ones can be added one at a time with “+ Add”.</span></span></label>
+    <label class="row" style="gap:10px;margin-top:10px;align-items:flex-start"><input type="checkbox" id="hs-aw" ${st.autoW?"checked":""} style="width:22px;height:22px;flex:none;margin-top:2px"><span><b>Fill in my weight from Health Connect</b><br><span class="small muted">Only on days you haven't entered a weight yourself.</span></span></label>
+    ${Object.keys(srcs).length?`<p class="small muted" style="margin:14px 0 0">Workouts from: ${Object.entries(srcs).map(([k,v])=>esc(k)+" ("+v+")").join(", ")}</p>`:""}
+    <div style="display:grid;gap:8px;margin-top:14px">${hOK()?`<button class="btn sec" id="hs-perm">Choose what Karteria can read</button><button class="btn sec" id="hs-full">Re-read everything</button>`:""}<button class="btn sec" id="hs-why">Privacy: what's read and why</button>${H.lastSync?`<button class="btn ghost" id="hs-clear" style="color:var(--bad)">Clear the cached copy on this phone</button>`:""}</div>
+    <button class="btn full" style="margin-top:12px" id="hs-done">Done</button>`, el=>{
+    let hist=st.history||"2y";
+    el.querySelectorAll("#hs-hist button").forEach(b=>b.onclick=()=>{ hist=b.dataset.v; el.querySelectorAll("#hs-hist button").forEach(x=>x.classList.toggle("on",x===b)); });
+    const commit=()=>{ st.maxHr=num(gv("hs-mx"))||undefined; st.stepGoal=num(gv("hs-sg"))||undefined; const histChanged=hist!==(st.history||"2y"); st.history=hist;
+      const ax=el.querySelector("#hs-ax").checked, aw=el.querySelector("#hs-aw").checked;
+      st.autoEx= ax? (st.autoEx||todayKey()) : undefined; st.autoW= aw? (st.autoW||todayKey()) : undefined;
+      Object.keys(st).forEach(k=>st[k]===undefined&&delete st[k]); save(); hAutoImport(); return histChanged; };
+    el.querySelector("#hs-done").onclick=()=>{ const ch=commit(); closeSheet(); render(); if(ch) hSync(true); };
+    const q=s=>el.querySelector(s);
+    if(q("#hs-perm")) q("#hs-perm").onclick=()=>{ commit(); HC.hcManage&&HC.hcManage(); };
+    if(q("#hs-full")) q("#hs-full").onclick=()=>{ commit(); closeSheet(); render(); hSync(true); };
+    q("#hs-why").onclick=()=>{ commit(); hPrivacySheet(); };
+    if(q("#hs-clear")) q("#hs-clear").onclick=()=>askConfirm("Clear cached health data?","This only removes Karteria's copy. Your data in Health Connect isn't touched, and it's read again on the next sync.","Clear",true,()=>{ H=hBlank(); hSave(); if(!NATIVE) demoOff(); closeSheet(); render(); });
+  });
+}
+function hAct(a){
+  if(a==="connect"){ if(HC) HC.hcRequest(); }
+  else if(a==="sync"){ if(hBusy){ toast("Already syncing"); return; } hSync(false); }
+  else if(a==="settings") hSettingsSheet();
+  else if(a==="history"){ toast("To see older history, allow past data for Karteria in Health Connect"); if(HC&&HC.hcManage) HC.hcManage(); }
+}
+function hBind(q){
+  q("[data-hact]").forEach(b=>b.onclick=e=>{ e.stopPropagation(); hAct(b.dataset.hact); });
+  q("[data-htab]").forEach(b=>b.onclick=()=>{ hTab=b.dataset.htab; window.scrollTo(0,0); render(); });
+  q("[data-hw]").forEach(b=>b.onclick=()=>hOpenWorkout(b.dataset.hw));
+  q("[data-hadd]").forEach(b=>b.onclick=e=>{ e.stopPropagation(); const w=H.workouts[b.dataset.hadd]; if(w){ hAddToLog(w); render(); } });
+  q("[data-huse]").forEach(b=>b.onclick=()=>{ const d=day(cur,true); if(b.dataset.huse==="w"){ d.weight=r1(H.vitals.weight[cur][0]*KG); } else d.bp={sys:Math.round(H.vitals.bps[cur][0]),dia:Math.round(H.vitals.bpd[cur][0])}; save(); render(); });
+  q("[data-hwtype]").forEach(b=>b.onclick=()=>{ hw.type=b.dataset.hwtype; const y=scrollY; render(); scrollTo(0,y); });
+  q("[data-hwper]").forEach(b=>b.onclick=()=>{ hw.period=b.dataset.hwper; const y=scrollY; render(); scrollTo(0,y); });
+  const hq=document.getElementById("hq"); if(hq) hq.oninput=()=>{ hw.q=hq.value; const L=document.getElementById("hwlist"); L.innerHTML=hWorkoutList(); L.querySelectorAll("[data-hw]").forEach(b=>b.onclick=()=>hOpenWorkout(b.dataset.hw)); };
+  const hsort=document.getElementById("hsort"); if(hsort) hsort.onchange=()=>{ hw.sort=hsort.value; const y=scrollY; render(); scrollTo(0,y); };
+  q("[data-hmet]").forEach(b=>b.onclick=()=>{ ha.metric=b.dataset.hmet; const y=scrollY; render(); scrollTo(0,y); });
+  q("[data-hrng]").forEach(b=>b.onclick=()=>{ ha.range=b.dataset.hrng; ha.off=0; render(); });
+  q("[data-hoff]").forEach(b=>b.onclick=()=>{ const n=+b.dataset.hoff; if(n>0&&ha.off>=0) return; ha.off+=n; render(); });
+  q("[data-hmonth]").forEach(b=>b.onclick=()=>{ const [y,m]=b.dataset.hmonth.split("-").map(Number), t=new Date(); ha.range="month"; ha.off=(y-t.getFullYear())*12+(m-t.getMonth()); render(); });
+  q("[data-hday]").forEach(b=>b.onclick=()=>hDaySheet(b.dataset.hday));
+  q("[data-hbr]").forEach(b=>b.onclick=()=>{ hb.range=b.dataset.hbr; render(); });
+  q("[data-hsr]").forEach(b=>b.onclick=()=>{ hsl.range=b.dataset.hsr; const y=scrollY; render(); scrollTo(0,y); });
+  q("[data-hsleep]").forEach(b=>b.onclick=()=>{ const k=b.dataset.hsleep, ss=Object.values(H.sleep).filter(s=>s.d===k).sort((a,c)=>a.s-c.s);
+    sheet(`<div class="row"><h3 style="flex:1">${esc(fullDate(k))}</h3><button class="iconbtn" data-hclose aria-label="Close" style="flex:none">×</button></div>${ss.map(s=>hSleepCard(s,true)).join("")}`, el=>el.querySelector("[data-hclose]").onclick=()=>{ closeSheet(); render(); }); });
+}
+// keep data fresh: on launch and whenever the app comes back to the front
+setTimeout(()=>{ hRefreshGranted(); if(S.settings.onboarded&&hOK()&&Date.now()-H.lastSync>15*60000) hSync(false); else if(hOK()) hStatsQueue(); }, 600);
+
+/* ---------- demo Health Connect for working on the page in a desktop browser (never used in the Android app) ---------- */
+function demoOff(){ try{ localStorage.removeItem("karteria.demo"); }catch(e){} }
+function demoHC(){
+  const on=()=>{ try{ return localStorage.getItem("karteria.demo")==="1"; }catch(e){ return false; } };
+  const ALL=["READ_EXERCISE","READ_EXERCISE_ROUTES","READ_HEART_RATE","READ_STEPS","READ_DISTANCE","READ_ACTIVE_CALORIES_BURNED","READ_TOTAL_CALORIES_BURNED","READ_FLOORS_CLIMBED","READ_ELEVATION_GAINED","READ_SPEED","READ_WEIGHT","READ_BODY_FAT","READ_RESTING_HEART_RATE","READ_HEART_RATE_VARIABILITY","READ_OXYGEN_SATURATION","READ_RESPIRATORY_RATE","READ_BLOOD_PRESSURE","READ_VO2_MAX","READ_SLEEP","READ_HEALTH_DATA_HISTORY"];
+  const rng=seed=>()=>{ seed=(seed*1664525+1013904223)>>>0; return seed/4294967296; };
+  const C=[44.0582,-121.3153], SRC="com.fitbit.FitbitMobile", DEV="Google Pixel Watch 3";
+  let DB=null;
+  function build(){
+    const R=rng(42), N=420, today=parseKey(todayKey()), W=[], days={}, V={weight:[],fat:[],rhr:[],hrv:[],spo2:[],resp:[],vo2:[],bps:[],bpd:[]}, SL=[];
+    for(let i=N;i>=0;i--){
+      const d=new Date(today); d.setDate(d.getDate()-i); const k=keyOf(d), dow=d.getDay(), prog=(N-i)/N;
+      const plan=[];
+      if([1,3,6].includes(dow)&&R()>.15){ const tm=R()<.15; plan.push({t:tm?34:33, mi: dow===6? 6+R()*2.5 : 3+R()*2.4, pace:(10.6-1.5*prog+R()*.6)*60, hr:150+R()*8-4*prog, hour:6.5+R()}); }
+      if([2,4].includes(dow)&&R()>.35) plan.push({t:45, dur:(35+R()*25)*60, hr:112+R()*10, hour:17.5+R()});
+      if(R()<.3) plan.push({t:53, mi:1.5+R()*2, pace:(17+R()*2)*60, hr:104+R()*10, hour:12+R()*7});
+      if(dow===0&&R()<.3) plan.push({t:4, mi:10+R()*12, pace:3600/(13+R()*3), hr:133+R()*8, hour:9+R()*2});
+      if(dow===5&&R()<.2) plan.push({t:60, dur:(25+R()*15)*60, mi:2+R(), hr:128+R()*8, hour:7});
+      let exmin=0, wsteps=0, wcal=0;
+      plan.forEach((p,j)=>{ const dur=p.dur||p.mi*p.pace, s=new Date(d); s.setHours(0,0,0,0); const st=s.getTime()+p.hour*3600000; if(st+dur*1000>Date.now()) return;
+        const route=[33,53,4].includes(p.t), steps=[33,34,53,60].includes(p.t)? Math.round(dur/60*(p.t===53?112:p.t===60?140:166)) : 0, acal=Math.round(dur/60*(p.t===45?6:p.t===53?4.8:p.t===4?9:11));
+        const w={id:"demo-"+k+"-"+j,t:p.t,s:Math.round(st),e:Math.round(st+dur*1000),d:k,src:SRC,dev:DEV,seed:Math.floor(R()*1e9),p};
+        if(route) w.r=1; if(R()<.08) w.no="Felt strong today"; W.push(w);
+        w.stx={dist:p.mi?Math.round(p.mi*MI*100)/100:undefined, acal, tcal:Math.round(acal*1.3), steps:steps||undefined, hra:Math.round(p.hr), hrx:Math.round(p.hr+12+R()*8), hrn:Math.round(p.hr-35), elev: route? Math.round(p.mi*12+R()*30) : undefined};
+        exmin+=dur/60; wsteps+=steps; wcal+=acal; });
+      if(i>0||new Date().getHours()>8){ const steps=Math.round(4500+R()*6000+wsteps), floors=Math.round(R()*14);
+        days[k]={steps,dist:Math.round(steps*0.78),acal:Math.round(steps*0.035+wcal),tcal:Math.round(2150+steps*0.04+wcal),floors,exmin:Math.round(exmin),hrmin:Math.round(52+R()*6-3*prog),hrmax:Math.round(plan.length?160+R()*20:110+R()*20)}; }
+      const lb=216-24*prog+Math.sin(i/9)*1.2+(R()-.5)*1.4;
+      if(R()<.85) V.weight.push([k,r1(lb/KG*100)/100]);
+      if(dow===1) V.fat.push([k,r1(29-5*prog+(R()-.5))]);
+      V.rhr.push([k,Math.round(62-6*prog+(R()-.5)*3)]); V.hrv.push([k,r1(31+14*prog+(R()-.5)*8)]); V.spo2.push([k,r1(95.4+R()*2.4)]); V.resp.push([k,r1(14.2+R()*1.6)]);
+      if(dow===2) V.vo2.push([k,r1(40.8+4.2*prog+(R()-.5))]);
+      if(d.getDate()%14===3){ V.bps.push([k,Math.round(132-10*prog+(R()-.5)*8)]); V.bpd.push([k,Math.round(86-6*prog+(R()-.5)*6)]); }
+      // sleep ending this morning
+      const bed=new Date(d); bed.setDate(bed.getDate()-1); bed.setHours(22,30+Math.floor(R()*80),0,0); const len=(6+R()*2.2)*3600, st=[]; let t=0, c=0;
+      while(t<len-600){ const cyc=Math.min(90*60,len-t); const parts=[[4,.45],[5,c<2?.3:.1],[4,.15],[6,c<2?.1:.3]]; parts.forEach(([ty,f])=>{ const d2=Math.round(cyc*f); if(d2>60){ st.push([ty,Math.round(t),d2]); t+=d2; } }); if(R()<.5){ const a=Math.round(120+R()*400); st.push([1,Math.round(t),a]); t+=a; } c++; }
+      const s0=bed.getTime(); if(s0+t*1000<Date.now()) SL.push({id:"demo-sl-"+k,s:s0,e:s0+t*1000,d:k,src:SRC,st});
+    }
+    DB={W,days,V,SL};
+  }
+  const reply=(id,o)=>setTimeout(()=>window.onHealth(id,JSON.stringify(o)),250);
+  function detail(w){
+    const R=rng(w.seed), p=w.p, dur=(w.e-w.s)/1000, hr=[], speed=[], route=[], dist=[];
+    const outdoor=!!w.r, mps=p.mi? p.mi*MI/dur : 0, rad=p.mi? p.mi*MI/(2*Math.PI)/1.15 : 0;
+    let cum=0, a=R()*6.28, hrv=95;
+    for(let t=0;t<=dur;t+=5){
+      const ramp=Math.min(1,t/300), surge=t>dur-420&&p.t!==45?8:0, target=p.hr+surge+(t/dur)*6;
+      hrv+=( (95+(target-95)*ramp) - hrv)*0.15 + (R()-.5)*3; if(p.t===45&&(t%240)<60) hrv+=1.2; hr.push([t,Math.round(hrv)]);
+      if(mps){ const v=mps*(1+(R()-.5)*.16+Math.sin(t/180)*.05); speed.push([t,Math.round(v*100)/100]); cum+=v*5;
+        if(outdoor){ const th=a+cum/rad/1.15, wob=1+.12*Math.sin(th*3); route.push([t, C[0]+rad*wob*Math.sin(th)/111320, C[1]+rad*wob*Math.cos(th)/(111320*Math.cos(C[0]*Math.PI/180)), 1105+25*Math.sin(th*2)+R()]); } } }
+    if(mps) for(let t=0;t<dur;t+=60){ const e=Math.min(dur,t+60); dist.push([t,e,Math.round(mps*(e-t)*(1+(R()-.5)*.1)*10)/10,SRC]); }
+    const o={hr,speed,dist,laps:[],seg:[]};
+    if(outdoor){ if(w.seed%4===0) o.routeStatus="consent"; else o.route=route; w.route=route; }
+    return o;
+  }
+  return {
+    hcSupported:()=>true,
+    hcGranted:()=>JSON.stringify(on()?ALL:[]),
+    hcRequest:()=>{ try{ localStorage.setItem("karteria.demo","1"); }catch(e){} setTimeout(()=>window.onHealthPerms(JSON.stringify(ALL)),300); },
+    hcManage:()=>toast("In the Android app this opens Health Connect"),
+    hcSync:(id,from,to)=>{ if(!DB) build(); const inT=x=>x.s>=from&&x.s<=to, k0=keyOf(new Date(from));
+      const vit={}; Object.entries(DB.V).forEach(([m,a])=>vit[m]=a.filter(r=>r[0]>=k0));
+      reply(id,{days:Object.entries(DB.days).filter(([k])=>k>=k0).map(([k,v])=>Object.assign({d:k},v)),
+        workouts:DB.W.filter(inT).map(w=>{ const o=Object.assign({},w); delete o.p; delete o.seed; delete o.stx; delete o.route; return o; }),
+        vitals:vit, sleep:DB.SL.filter(inT)}); },
+    hcStats:(id,json)=>{ if(!DB) build(); const out={}; JSON.parse(json).forEach(x=>{ const w=DB.W.find(y=>y.id===x.id); out[x.id]=w? JSON.parse(JSON.stringify(w.stx)) : {}; }); reply(id,out); },
+    hcDetail:(id,sid)=>{ if(!DB) build(); const w=DB.W.find(y=>y.id===sid); reply(id, w? detail(w) : {error:"not found"}); },
+    hcRoute:(sid)=>{ const w=DB&&DB.W.find(y=>y.id===sid); setTimeout(()=>window.onHealthRoute(sid, w&&w.route? JSON.stringify(w.route) : null),300); }
+  };
+}
+
 /* ---------- events ---------- */
 function bind(){
   const q=s=>app.querySelectorAll(s);
@@ -964,6 +1549,7 @@ function bind(){
   q("[data-editfood]").forEach(b=>b.onclick=()=>foodEditSheet(b.dataset.editfood));
   q("[data-delfoodsaved]").forEach(b=>b.onclick=()=>{ const i=S.foods.findIndex(f=>f.id===b.dataset.delfoodsaved); const [gone]=S.foods.splice(i,1); save(); render();
     toast(gone.name+" removed from My foods", {label:"Undo", fn:()=>{ S.foods.push(gone); save(); render(); }}); });
+  hBind(q);
 }
 function act(a){
   if(a==="prev"){ cur=addDays(cur,-1); render(); }
