@@ -860,7 +860,7 @@ function viewSettings(){
   <div class="card"><h2>Your data</h2>
     <p class="small muted" style="margin-top:0">${Object.keys(S.days).length} days logged · stored only on this phone, and never copied to Google backups. ${S.settings.lastBackup?"Last backup: "+nice(keyOf(new Date(S.settings.lastBackup)))+".":"No backup saved yet."} The app reminds you if it's been 30 days.</p>
     <div style="display:grid;gap:8px"><button class="btn" data-act="export">Save backup file</button><button class="btn sec" data-act="import">Import backup file</button><button class="btn sec" data-act="csv">Export spreadsheet (CSV)</button><button class="btn danger" data-act="reset">Erase all data</button></div>
-  </div><p class="small muted" style="text-align:center">Karteria 2.7.6 · <i>karteria</i>, Stoic steadfast endurance</p></div>`;
+  </div><p class="small muted" style="text-align:center">Karteria 2.7.7 · <i>karteria</i>, Stoic steadfast endurance</p></div>`;
 }
 function itemSheet(kind,id){
   const K=KINDS[kind], x=id? items(kind).find(s=>s.id===id) : {name:"",dose:"",perDay:1};
@@ -958,7 +958,9 @@ let hSeq=0; const hWait={};
 function hCall(fn,...args){ return new Promise(res=>{ const id=++hSeq; hWait[id]=res; try{ HC[fn](id,...args); }catch(e){ delete hWait[id]; res({error:String(e.message||e)}); } }); }
 window.onHealth=(id,json)=>{ const r=hWait[id]; if(!r) return; delete hWait[id]; let o; try{ o=JSON.parse(json); }catch(e){ o={error:"unreadable reply"}; } r(o); };
 window.onHealthPerms=json=>{ try{ hGranted=JSON.parse(json); }catch(e){} if(hOK()){ toast("Connected. Reading your health data…"); hSync(true); } else toast("No health access was allowed"); tab="health"; render(); };
-window.onHealthResume=()=>{ hRefreshGranted(); if(hOK() && Date.now()-H.lastSync>15*60000) hSync(false); };
+window.onHealthResume=()=>{ hRefreshGranted(); if(!hOK()) return;
+  const newHist = H.lastSync && !H.hist && hGranted.includes("READ_HEALTH_DATA_HISTORY");   // past data just allowed: load the rest now
+  if(newHist || Date.now()-H.lastSync>15*60000) hSync(false); else if(tab==="health"&&!sheetOpen) render(); };
 window.openHealthPrivacy=()=>{ tab="health"; render(); hPrivacySheet(); };
 
 /* --- sync: read a time window, replace that window in the cache --- */
@@ -1121,6 +1123,7 @@ function viewHealth(){
   if(!hOK()) return h+hConnectCard()+`</div>`;
   h+=`<div class="seg" style="margin-bottom:8px">${[["workouts","Workouts"],["activity","Activity"],["body","Body"],["sleep","Sleep"]].map(([v,l])=>`<button data-htab="${v}" class="${hTab===v?"on":""}">${l}</button>`).join("")}</div>
     <div class="small muted" id="hstatus" style="margin:0 4px 10px">${hStatus()}</div>`;
+  if(H.lastSync&&!hGranted.includes("READ_HEALTH_DATA_HISTORY")) h+=`<div class="card nudge"><div style="flex:1;min-width:0"><div style="font-weight:700">Only your last 30 days are visible</div><div class="small muted">Health Connect hides older data unless you allow it. Open Health Connect, tap <b>App permissions → Karteria</b>, and turn on <b>access to past data</b>. Karteria loads the rest of your history the next time you open it.</div><button class="btn" data-hact="perms" style="margin-top:10px">Open Health Connect</button></div></div>`;
   if(!H.lastSync && hBusy) return h+`<div class="card empty-note">Reading your health data… The first sync can take a minute.</div></div>`;
   return h+({workouts:hWorkouts,activity:hActivity,body:hBody,sleep:hSleep}[hTab])()+`</div>`;
 }
