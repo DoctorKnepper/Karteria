@@ -218,6 +218,9 @@ public class MainActivity extends Activity {
         public void hcSync(int id, double from, double to) { if (health != null) health.sync(id, (long) from, (long) to); }
 
         @JavascriptInterface
+        public void hcWorkouts(int id, double from, double to) { if (health != null) health.workoutsOnly(id, (long) from, (long) to); }
+
+        @JavascriptInterface
         public void hcHeart(int id, double from, double to) { if (health != null) health.heartOnly(id, (long) from, (long) to); }
 
         @JavascriptInterface

@@ -860,7 +860,7 @@ function viewSettings(){
   <div class="card"><h2>Your data</h2>
     <p class="small muted" style="margin-top:0">${Object.keys(S.days).length} days logged · stored only on this phone, and never copied to Google backups. ${S.settings.lastBackup?"Last backup: "+nice(keyOf(new Date(S.settings.lastBackup)))+".":"No backup saved yet."} The app reminds you if it's been 30 days.</p>
     <div style="display:grid;gap:8px"><button class="btn" data-act="export">Save backup file</button><button class="btn sec" data-act="import">Import backup file</button><button class="btn sec" data-act="csv">Export spreadsheet (CSV)</button><button class="btn danger" data-act="reset">Erase all data</button></div>
-  </div><p class="small muted" style="text-align:center">Karteria 2.7.8 · <i>karteria</i>, Stoic steadfast endurance</p></div>`;
+  </div><p class="small muted" style="text-align:center">Karteria 2.7.9 · <i>karteria</i>, Stoic steadfast endurance</p></div>`;
 }
 function itemSheet(kind,id){
   const K=KINDS[kind], x=id? items(kind).find(s=>s.id===id) : {name:"",dose:"",perDay:1};
@@ -942,6 +942,9 @@ const srcName = p => SRC_NAMES[p] || (p? p.split(".").filter(x=>!/^(com|android|
 const hType = w => HC_TYPES[w.t]||"Workout";
 const hName = w => w.ti && w.ti.toLowerCase()!==hType(w).toLowerCase() && !/^(workout|exercise)$/i.test(w.ti) ? w.ti : hType(w);
 const hDur = w => Math.round((w.e-w.s)/1000);
+/* Health Connect marks how each workout was made: 1 started on the watch or phone, 2 detected automatically, 3 entered by hand */
+const hIsAuto = w => w.rm===2;
+const hWs = () => Object.values(H.workouts).filter(w=>!hIsAuto(w)||hs().autoWorkouts);
 const hMi = w => w.st&&w.st.dist&&DIST_T.has(w.t) ? w.st.dist/MI : 0;
 const hasPaceW = w => PACE_T.has(w.t) && hMi(w)>=0.2;
 const clock = ms => new Date(ms).toLocaleTimeString([], {hour:"numeric",minute:"2-digit"});
@@ -1008,6 +1011,12 @@ async function hSync(full){
   if(ok) ok=await hHeartRetry();
   hBusy=false; if(ok) hMsg=""; hSave(); hPaint(); if(ok) hStatsQueue();
 }
+async function hRecordedHow(){
+  const from=Math.min(...Object.values(H.workouts).map(w=>w.s), Date.now()), r=await hCallT(4*60000,"hcWorkouts",from-DAY,Date.now());
+  if(!r.workouts) return;
+  r.workouts.forEach(w=>{ const o=H.workouts[w.id]; if(o) o.rm=w.rm; });
+  H.rmV=1; hSave(); hPaint(true);
+}
 /* Heart-rate trends for windows where they couldn't be read the first time (slow reads or Health Connect asking for a pause). */
 async function hHeartRetry(){
   while(H.heartRetry&&H.heartRetry.length){
@@ -1067,7 +1076,7 @@ function hAddToLog(w, quiet){
 }
 function hAutoImport(){
   const st=hs(); let changed=false;
-  if(st.autoEx) Object.values(H.workouts).sort((a,b)=>a.s-b.s).forEach(w=>{ if(w.d<st.autoEx||!w.st||(st.skip||[]).includes(w.id)||hInLog(w)) return; hAddToLog(w,true); changed=true; });
+  if(st.autoEx) hWs().sort((a,b)=>a.s-b.s).forEach(w=>{ if(w.d<st.autoEx||!w.st||(st.skip||[]).includes(w.id)||hInLog(w)) return; hAddToLog(w,true); changed=true; });
   if(changed) save();
 }
 function hLogHints(k,d,part){
@@ -1075,7 +1084,7 @@ function hLogHints(k,d,part){
   if(part==="body"){ const w=(H.vitals.weight||{})[k], bs=(H.vitals.bps||{})[k], bd=(H.vitals.bpd||{})[k], out=[];
     if(bs&&bd&&!d.bp) out.push(`<span>BP <b>${Math.round(bs[0])}/${Math.round(bd[0])}</b> <span class="link" data-huse="bp">Use</span></span>`);
     return out.length? `<div class="small muted" style="margin-top:8px;display:flex;gap:14px;flex-wrap:wrap">${out.join("")}</div>` : ""; }
-  const ws=Object.values(H.workouts).filter(w=>w.d===k&&!hInLog(w)).sort((a,b)=>a.s-b.s);
+  const ws=hWs().filter(w=>w.d===k&&!hInLog(w)).sort((a,b)=>a.s-b.s);
   if(!ws.length) return "";
   return `<div style="margin-top:10px;padding:10px 12px;border-radius:12px;background:var(--soft)"><div class="small muted" style="font-weight:700;margin-bottom:2px">From your watch</div><ul class="list">`+ws.map(w=>`<li><div class="main" data-hw="${esc(w.id)}" style="cursor:pointer"><div class="t">${esc(hName(w))}</div><div class="s">${clock(w.s)} · ${esc(hWLine(w))}</div></div><button class="btn sec" data-hadd="${esc(w.id)}" style="padding:7px 12px;flex:none">+ Add</button></li>`).join("")+`</ul></div>`;
 }
@@ -1088,7 +1097,7 @@ function hWLine(w){ const st=w.st||{}, b=[], mi=hMi(w), dur=hDur(w);
   if(st.hra) b.push("♥ "+st.hra);
   if(st.acal) b.push(st.acal+" cal");
   return b.join(" · "); }
-function hMaxHr(){ const set=num(hs().maxHr); if(set) return {v:set,set:true}; const top=Math.max(0,...Object.values(H.workouts).map(w=>w.st&&w.st.hrx||0)); return {v: top>=150? top : 190, set:false}; }
+function hMaxHr(){ const set=num(hs().maxHr); if(set) return {v:set,set:true}; const top=Math.max(0,...hWs().map(w=>w.st&&w.st.hrx||0)); return {v: top>=150? top : 190, set:false}; }
 const ZONES=[{n:"Warm-up",lo:.5,c:"#8ea4c2"},{n:"Easy",lo:.6,c:"var(--good)"},{n:"Aerobic",lo:.7,c:"var(--fat)"},{n:"Threshold",lo:.8,c:"#e8822d"},{n:"Max",lo:.9,c:"var(--bad)"}];
 const zoneOf = (bpm,max) => { const p=bpm/max; for(let i=ZONES.length-1;i>=0;i--) if(p>=ZONES[i].lo) return i; return -1; };
 function tsChart(series,o={}){
@@ -1117,7 +1126,7 @@ const kAdd = (k,n)=>addDays(k,n);
 const dayIdx = (k,k0) => Math.round((parseKey(k)-parseKey(k0))/DAY);
 
 /* ---------- views ---------- */
-let hTab="workouts", hw={q:"",type:"all",period:"90",sort:"new"}, ha={metric:"steps",range:"week",off:0}, hb={range:"90"}, hsl={range:"30"};
+let hTab="workouts", hw={q:"",type:"all",period:"month",sort:"new"}, ha={metric:"steps",range:"week",off:0}, hb={range:"90"}, hsl={range:"30"};
 function viewHealth(){
   hRefreshGranted();
   let h=`<header class="top"><h1>Health</h1>${hOK()?`<button class="iconbtn" data-hact="sync" aria-label="Sync now" ${hBusy?'style="opacity:.5"':""}>↻</button>`:""}<button class="iconbtn" data-hact="settings" aria-label="Health settings">⚙</button></header><div class="wrap">`;
@@ -1146,20 +1155,22 @@ function hPrivacySheet(){
 /* --- workouts --- */
 function hFiltered(){
   const now=Date.now(), q=hw.q.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  let L=Object.values(H.workouts).filter(w=>(hw.period==="all"||w.s>=now-(+hw.period)*DAY)&&(hw.type==="all"||String(w.t)===hw.type));
+  const m0=todayKey().slice(0,8)+"01";
+  let L=hWs().filter(w=>(hw.period==="all"||(hw.period==="month"? w.d>=m0 : w.s>=now-(+hw.period)*DAY))&&(hw.type==="all"||String(w.t)===hw.type));
   if(q.length) L=L.filter(w=>{ const hay=[hName(w),hType(w),w.ti,w.no,fullDate(w.d),nice(w.d),["January","February","March","April","May","June","July","August","September","October","November","December"][parseKey(w.d).getMonth()],WD[parseKey(w.d).getDay()]==="Sat"||WD[parseKey(w.d).getDay()]==="Sun"?"weekend":"",srcName(w.src),w.dev,w.st&&w.st.hra?"hr "+w.st.hra:""].join(" ").toLowerCase(); return q.every(t=>hay.includes(t)); });
   const by={new:(a,b)=>b.s-a.s, old:(a,b)=>a.s-b.s, dist:(a,b)=>hMi(b)-hMi(a), dur:(a,b)=>hDur(b)-hDur(a), pace:(a,b)=>(hasPaceW(a)?hDur(a)/hMi(a):1e9)-(hasPaceW(b)?hDur(b)/hMi(b):1e9), hr:(a,b)=>((b.st||{}).hra||0)-((a.st||{}).hra||0)}[hw.sort];
   return L.sort(by);
 }
 function hWorkouts(){
-  const all=Object.values(H.workouts);
+  const all=hWs(), hidden=Object.keys(H.workouts).length-all.length;
   if(!all.length) return `<div class="card empty-note">No workouts found${hGranted.includes("READ_EXERCISE")?"":". Allow <b>Exercise</b> in Health Connect to see them"}. Workouts you record on your watch will show up here.</div>`;
   const counts={}; all.forEach(w=>counts[w.t]=(counts[w.t]||0)+1);
   const types=Object.keys(counts).sort((a,b)=>counts[b]-counts[a]);
   return `<div class="card"><input id="hq" type="search" placeholder="Search: run, October, Fitbit, notes…" value="${esc(hw.q)}">
     <div class="chips" style="margin-top:10px">${[["all","All"],...types.map(t=>[t,HC_TYPES[t]||"Workout"])].map(([v,l])=>`<button class="chip ${hw.type===v?"on":""}" data-hwtype="${v}">${esc(l)}${v!=="all"?` <span style="opacity:.6">${counts[v]}</span>`:""}</button>`).join("")}</div>
-    <div class="row" style="margin-top:10px;gap:8px"><div class="seg" style="flex:1.6">${[["30","30d"],["90","90d"],["365","1y"],["all","All"]].map(([v,l])=>`<button data-hwper="${v}" class="${hw.period===v?"on":""}">${l}</button>`).join("")}</div>
+    <div class="row" style="margin-top:10px;gap:8px"><div class="seg" style="flex:2.2">${[["month",MO[new Date().getMonth()]],["30","30d"],["90","90d"],["365","1y"],["all","All"]].map(([v,l])=>`<button data-hwper="${v}" class="${hw.period===v?"on":""}">${l}</button>`).join("")}</div>
     <select id="hsort" style="flex:1">${[["new","Newest"],["old","Oldest"],["dist","Longest distance"],["dur","Longest time"],["pace","Fastest pace"],["hr","Highest heart rate"]].map(([v,l])=>`<option value="${v}" ${hw.sort===v?"selected":""}>${l}</option>`).join("")}</select></div></div>
+    ${hidden?`<div class="small muted" style="margin:-4px 4px 10px">${hidden} auto-detected workout${hidden>1?"s":""} hidden · <span class="link" data-hact="settings">change</span></div>`:""}
     <div id="hwlist">${hWorkoutList()}</div>`;
 }
 function hWorkoutList(){
@@ -1246,7 +1257,7 @@ function hRouteSvg(route,hr,max){
 }
 function hSimilar(w){
   const mi=hMi(w), dur=hDur(w);
-  return Object.values(H.workouts).filter(x=>x.t===w.t&&x.st&&(mi>=0.25? Math.abs(hMi(x)-mi)/mi<=0.2 : Math.abs(hDur(x)-dur)/dur<=0.25)).sort((a,b)=>a.s-b.s);
+  return hWs().filter(x=>x.t===w.t&&x.st&&(mi>=0.25? Math.abs(hMi(x)-mi)/mi<=0.2 : Math.abs(hDur(x)-dur)/dur<=0.25)).sort((a,b)=>a.s-b.s);
 }
 function hWorkoutHtml(w,det){
   const st=w.st||{}, mi=hMi(w), dur=hDur(w), maxHr=hMaxHr();
@@ -1346,7 +1357,7 @@ function hActivity(){
   return h;
 }
 function hDaySheet(k){
-  const d=H.days[k]||{}, ws=Object.values(H.workouts).filter(w=>w.d===k).sort((a,b)=>a.s-b.s), sl=Object.values(H.sleep).filter(s=>s.d===k), V=H.vitals, vit=[];
+  const d=H.days[k]||{}, ws=hWs().filter(w=>w.d===k).sort((a,b)=>a.s-b.s), sl=Object.values(H.sleep).filter(s=>s.d===k), V=H.vitals, vit=[];
   const vv=(m,f)=>{ const x=(V[m]||{})[k]; if(x) vit.push(f(x[0])); };
 vv("fat",v=>["Body fat",r1(v)+"%"]); vv("rhr",v=>["Resting HR",Math.round(v)]); if(!(V.rhr||{})[k]) vv("rhrcalc",v=>["Resting HR*",Math.round(v)]); vv("hravg",v=>["Average HR",Math.round(v)]); vv("hrsleep",v=>["Sleeping HR",Math.round(v)]); vv("hrv",v=>["HRV",Math.round(v)+" ms"]); vv("spo2",v=>["SpO₂",r1(v)+"%"]); vv("resp",v=>["Breathing",r1(v)+"/min"]); vv("vo2",v=>["VO₂ max",r1(v)]);
   if((V.bps||{})[k]&&(V.bpd||{})[k]) vit.push(["BP",Math.round(V.bps[k][0])+"/"+Math.round(V.bpd[k][0])]);
@@ -1484,7 +1495,8 @@ function hSettingsSheet(){
     <p class="small muted" style="margin:4px 0 0">Heart-rate zones use your max heart rate. Blank uses the highest reading from your workouts${mx.set?"":" ("+mx.v+")"}.</p>
     <label class="f">How far back to read</label><div class="seg" id="hs-hist">${[["1y","1 year"],["2y","2 years"],["5y","5 years"],["all","All"]].map(([v,l])=>`<button data-v="${v}" class="${(st.history||"2y")===v?"on":""}">${l}</button>`).join("")}</div>
     ${H.lastSync&&!H.hist?`<p class="small muted" style="margin:6px 0 0">Health Connect is only sharing recent data. To see older history, allow <b>past data</b> for Karteria in Health Connect (Android 15 and newer).</p>`:""}
-    <label class="row" style="gap:10px;margin-top:14px;align-items:flex-start"><input type="checkbox" id="hs-ax" ${st.autoEx?"checked":""} style="width:22px;height:22px;flex:none;margin-top:2px"><span><b>Add new watch workouts to my log</b><br><span class="small muted">From today on. Older ones can be added one at a time with “+ Add”.</span></span></label>
+    <label class="row" style="gap:10px;margin-top:14px;align-items:flex-start"><input type="checkbox" id="hs-aw2" ${st.autoWorkouts?"checked":""} style="width:22px;height:22px;flex:none;margin-top:2px"><span><b>Show auto-detected workouts</b><br><span class="small muted">Walks and runs your watch noticed on its own. Off: only workouts you started yourself.</span></span></label>
+    <label class="row" style="gap:10px;margin-top:10px;align-items:flex-start"><input type="checkbox" id="hs-ax" ${st.autoEx?"checked":""} style="width:22px;height:22px;flex:none;margin-top:2px"><span><b>Add new watch workouts to my log</b><br><span class="small muted">From today on. Older ones can be added one at a time with “+ Add”.</span></span></label>
     ${hCoverage()}
     ${Object.keys(srcs).length?`<p class="small muted" style="margin:14px 0 0">Workouts from: ${Object.entries(srcs).map(([k,v])=>esc(k)+" ("+v+")").join(", ")}</p>`:""}
     <div style="display:grid;gap:8px;margin-top:14px">${hOK()?`<button class="btn sec" id="hs-perm">Choose what Karteria can read</button><button class="btn sec" id="hs-full">Re-read everything</button>`:""}<button class="btn sec" id="hs-why">Privacy: what's read and why</button>${H.lastSync?`<button class="btn ghost" id="hs-clear" style="color:var(--bad)">Clear the cached copy on this phone</button>`:""}</div>
@@ -1492,7 +1504,7 @@ function hSettingsSheet(){
     let hist=st.history||"2y";
     el.querySelectorAll("#hs-hist button").forEach(b=>b.onclick=()=>{ hist=b.dataset.v; el.querySelectorAll("#hs-hist button").forEach(x=>x.classList.toggle("on",x===b)); });
     const commit=()=>{ st.maxHr=num(gv("hs-mx"))||undefined; st.stepGoal=num(gv("hs-sg"))||undefined; const histChanged=hist!==(st.history||"2y"); st.history=hist;
-      const ax=el.querySelector("#hs-ax").checked;
+      const ax=el.querySelector("#hs-ax").checked; st.autoWorkouts=el.querySelector("#hs-aw2").checked||undefined;
       st.autoEx= ax? (st.autoEx||todayKey()) : undefined; delete st.autoW;
       Object.keys(st).forEach(k=>st[k]===undefined&&delete st[k]); save(); hAutoImport(); return histChanged; };
     el.querySelector("#hs-done").onclick=()=>{ const ch=commit(); closeSheet(); render(); if(ch) hSync(true); };
@@ -1549,6 +1561,7 @@ function hBind(q){
 }
 // keep data fresh: on launch and whenever the app comes back to the front
 setTimeout(()=>{ hRefreshGranted(); if(!hOK()||!S.settings.onboarded) return;
+  if(H.lastSync&&!H.rmV&&HC.hcWorkouts){ hRecordedHow(); }
   if(H.lastSync&&(H.heartV||0)<3){   // re-read heart rate once (older windows could have been skipped before)
     const now=Date.now(), from=H.backTo||now-30*DAY; H.heartRetry=[]; for(let z=now; z>from; z-=SYNC_STEP) H.heartRetry.unshift([Math.max(from,z-SYNC_STEP),z]);
     H.heartV=3; hSave(); hSync(false); }
@@ -1576,7 +1589,7 @@ function demoHC(){
       plan.forEach((p,j)=>{ const dur=p.dur||p.mi*p.pace, s=new Date(d); s.setHours(0,0,0,0); const st=s.getTime()+p.hour*3600000; if(st+dur*1000>Date.now()) return;
         const route=[33,53,4].includes(p.t), steps=[33,34,53,60].includes(p.t)? Math.round(dur/60*(p.t===53?112:p.t===60?140:166)) : 0, acal=Math.round(dur/60*(p.t===45?6:p.t===53?4.8:p.t===4?9:11));
         const w={id:"demo-"+k+"-"+j,t:p.t,s:Math.round(st),e:Math.round(st+dur*1000),d:k,src:SRC,dev:DEV,seed:Math.floor(R()*1e9),p};
-        if(route) w.r=1; if(R()<.08) w.no="Felt strong today"; W.push(w);
+        if(route) w.r=1; w.rm= p.t===53&&R()<.6? 2 : 1; if(R()<.08) w.no="Felt strong today"; W.push(w);
         w.stx={dist:p.mi?Math.round(p.mi*MI*100)/100:undefined, acal, tcal:Math.round(acal*1.3), steps:steps||undefined, hra:Math.round(p.hr), hrx:Math.round(p.hr+12+R()*8), hrn:Math.round(p.hr-35), elev: route? Math.round(p.mi*12+R()*30) : undefined};
         exmin+=dur/60; wsteps+=steps; wcal+=acal; });
       if(i>0||new Date().getHours()>8){ const steps=Math.round(4500+R()*6000+wsteps), floors=Math.round(R()*14);
@@ -1620,6 +1633,7 @@ function demoHC(){
         workouts:DB.W.filter(inT).map(w=>{ const o=Object.assign({},w); delete o.p; delete o.seed; delete o.stx; delete o.route; return o; }),
         vitals:vit, sleep:DB.SL.filter(inT)}); },
     hcHeart:(id)=>reply(id,{heart:{}}),
+    hcWorkouts:(id)=>reply(id,{workouts:[]}),
     hcStats:(id,json)=>{ if(!DB) build(); const out={}; JSON.parse(json).forEach(x=>{ const w=DB.W.find(y=>y.id===x.id); out[x.id]=w? JSON.parse(JSON.stringify(w.stx)) : {}; }); reply(id,out); },
     hcDetail:(id,sid)=>{ if(!DB) build(); const w=DB.W.find(y=>y.id===sid); reply(id, w? detail(w) : {error:"not found"}); },
     hcRoute:(sid)=>{ const w=DB&&DB.W.find(y=>y.id===sid); setTimeout(()=>window.onHealthRoute(sid, w&&w.route? JSON.stringify(w.route) : null),300); }

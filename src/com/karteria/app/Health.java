@@ -280,6 +280,7 @@ final class Health {
                         + (dev.getModel() == null ? "" : dev.getModel())).trim();
                 if (!m.isEmpty()) o.put("dev", m);
             }
+            o.put("rm", s.getMetadata().getRecordingMethod());   // 1 started by you, 2 auto-detected, 3 entered by hand
             if (s.hasRoute()) o.put("r", 1);
             if (!s.getLaps().isEmpty()) o.put("laps", s.getLaps().size());
             arr.put(o);
@@ -410,6 +411,11 @@ final class Health {
         List<double[]> out = new ArrayList<>();
         for (double[] x : all) if (x[0] >= a && x[0] < b) out.add(x);
         return out;
+    }
+
+    /** Workouts only (light), e.g. to learn how existing workouts were recorded. */
+    void workoutsOnly(int id, long fromMs, long toMs) {
+        run(id, () -> new JSONObject().put("workouts", workouts(Instant.ofEpochMilli(fromMs), Instant.ofEpochMilli(toMs))));
     }
 
     /** Heart-rate trends only, for a window whose heart rate couldn't be read during a sync. */
