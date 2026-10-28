@@ -860,7 +860,7 @@ function viewSettings(){
   <div class="card"><h2>Your data</h2>
     <p class="small muted" style="margin-top:0">${Object.keys(S.days).length} days logged · stored only on this phone, and never copied to Google backups. ${S.settings.lastBackup?"Last backup: "+nice(keyOf(new Date(S.settings.lastBackup)))+".":"No backup saved yet."} The app reminds you if it's been 30 days.</p>
     <div style="display:grid;gap:8px"><button class="btn" data-act="export">Save backup file</button><button class="btn sec" data-act="import">Import backup file</button><button class="btn sec" data-act="csv">Export spreadsheet (CSV)</button><button class="btn danger" data-act="reset">Erase all data</button></div>
-  </div><p class="small muted" style="text-align:center">Karteria 2.7.9 · <i>karteria</i>, Stoic steadfast endurance</p></div>`;
+  </div><p class="small muted" style="text-align:center">Karteria 2.8 · <i>karteria</i>, Stoic steadfast endurance</p></div>`;
 }
 function itemSheet(kind,id){
   const K=KINDS[kind], x=id? items(kind).find(s=>s.id===id) : {name:"",dose:"",perDay:1};
@@ -1076,7 +1076,6 @@ function hAddToLog(w, quiet){
 }
 function hAutoImport(){
   const st=hs(); let changed=false;
-  if(st.autoEx) hWs().sort((a,b)=>a.s-b.s).forEach(w=>{ if(w.d<st.autoEx||!w.st||(st.skip||[]).includes(w.id)||hInLog(w)) return; hAddToLog(w,true); changed=true; });
   if(changed) save();
 }
 function hLogHints(k,d,part){
@@ -1153,52 +1152,100 @@ function hPrivacySheet(){
 }
 
 /* --- workouts --- */
+/* The Workouts list shows only what you logged in Karteria. Watch workouts are suggestions you can add,
+   and when a logged entry matches one, its heart rate, splits and route are shown with it. */
+function hLogged(){ const out=[]; Object.keys(S.days).forEach(k=>(S.days[k].exercises||[]).forEach((e,i)=>out.push({k,i,e}))); return out; }
+function hMatchW(x){ const e=x.e; if(e.hcId&&H.workouts[e.hcId]) return H.workouts[e.hcId];
+  return Object.values(H.workouts).find(w=>w.d===x.k&&hKType(w.t)[0]===e.type&&(!e.time||Math.abs(e.time-hDur(w))<=Math.max(180,hDur(w)*0.15))) || null; }
+const lPace = x => x.e.distance&&x.e.time? x.e.time/x.e.distance : null;
 function hFiltered(){
-  const now=Date.now(), q=hw.q.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  const m0=todayKey().slice(0,8)+"01";
-  let L=hWs().filter(w=>(hw.period==="all"||(hw.period==="month"? w.d>=m0 : w.s>=now-(+hw.period)*DAY))&&(hw.type==="all"||String(w.t)===hw.type));
-  if(q.length) L=L.filter(w=>{ const hay=[hName(w),hType(w),w.ti,w.no,fullDate(w.d),nice(w.d),["January","February","March","April","May","June","July","August","September","October","November","December"][parseKey(w.d).getMonth()],WD[parseKey(w.d).getDay()]==="Sat"||WD[parseKey(w.d).getDay()]==="Sun"?"weekend":"",srcName(w.src),w.dev,w.st&&w.st.hra?"hr "+w.st.hra:""].join(" ").toLowerCase(); return q.every(t=>hay.includes(t)); });
-  const by={new:(a,b)=>b.s-a.s, old:(a,b)=>a.s-b.s, dist:(a,b)=>hMi(b)-hMi(a), dur:(a,b)=>hDur(b)-hDur(a), pace:(a,b)=>(hasPaceW(a)?hDur(a)/hMi(a):1e9)-(hasPaceW(b)?hDur(b)/hMi(b):1e9), hr:(a,b)=>((b.st||{}).hra||0)-((a.st||{}).hra||0)}[hw.sort];
+  const now=todayKey(), q=hw.q.trim().toLowerCase().split(/\s+/).filter(Boolean), m0=now.slice(0,8)+"01";
+  const from= hw.period==="all"? "0000" : hw.period==="month"? m0 : addDays(now,-(+hw.period));
+  let L=hLogged().filter(x=>x.k>=from&&(hw.type==="all"||x.e.type===hw.type));
+  const FULLM=["January","February","March","April","May","June","July","August","September","October","November","December"];
+  if(q.length) L=L.filter(x=>{ const d=parseKey(x.k), hay=[x.e.type,x.e.notes,x.e.location,x.e.machine,x.e.sets,fullDate(x.k),nice(x.k),FULLM[d.getMonth()],d.getDay()%6===0?"weekend":""].join(" ").toLowerCase(); return q.every(t=>hay.includes(t)); });
+  const hr=x=>{ const w=hMatchW(x); return w&&w.st&&w.st.hra||0; };
+  const by={new:(a,b)=>b.k.localeCompare(a.k)||b.i-a.i, old:(a,b)=>a.k.localeCompare(b.k)||a.i-b.i, dist:(a,b)=>(b.e.distance||0)-(a.e.distance||0), dur:(a,b)=>(b.e.time||0)-(a.e.time||0), pace:(a,b)=>(lPace(a)||1e9)-(lPace(b)||1e9), hr:(a,b)=>hr(b)-hr(a)}[hw.sort];
   return L.sort(by);
 }
+function hSuggestions(){
+  const st=hs(), since=addDays(todayKey(),-30), skip=st.skip||[];
+  const L=hWs().filter(w=>w.d>=since&&!skip.includes(w.id)&&!hInLog(w)).sort((a,b)=>b.s-a.s);
+  if(!L.length) return "";
+  return `<div class="card"><h2>From your watch <span class="r small muted" style="text-transform:none;letter-spacing:0">not in your log</span></h2><ul class="list">`+L.slice(0,hShowAllSug?50:4).map(w=>`<li><div class="main" data-hw="${esc(w.id)}" style="cursor:pointer"><div class="t">${esc(hName(w))}</div><div class="s">${esc(nice(w.d))} · ${clock(w.s)}</div><div class="s">${esc(hWLine(w))}</div></div><button class="btn sec" data-hadd="${esc(w.id)}" style="padding:7px 12px;flex:none">+ Add</button><button class="x" data-hskip="${esc(w.id)}" aria-label="Dismiss">×</button></li>`).join("")+`</ul>${L.length>4&&!hShowAllSug?`<button class="btn ghost" data-hsugall>Show all ${L.length}</button>`:""}</div>`;
+}
+let hShowAllSug=false;
 function hWorkouts(){
-  const all=hWs(), hidden=Object.keys(H.workouts).length-all.length;
-  if(!all.length) return `<div class="card empty-note">No workouts found${hGranted.includes("READ_EXERCISE")?"":". Allow <b>Exercise</b> in Health Connect to see them"}. Workouts you record on your watch will show up here.</div>`;
-  const counts={}; all.forEach(w=>counts[w.t]=(counts[w.t]||0)+1);
+  const all=hLogged(), counts={}; all.forEach(x=>counts[x.e.type]=(counts[x.e.type]||0)+1);
   const types=Object.keys(counts).sort((a,b)=>counts[b]-counts[a]);
-  return `<div class="card"><input id="hq" type="search" placeholder="Search: run, October, Fitbit, notes…" value="${esc(hw.q)}">
-    <div class="chips" style="margin-top:10px">${[["all","All"],...types.map(t=>[t,HC_TYPES[t]||"Workout"])].map(([v,l])=>`<button class="chip ${hw.type===v?"on":""}" data-hwtype="${v}">${esc(l)}${v!=="all"?` <span style="opacity:.6">${counts[v]}</span>`:""}</button>`).join("")}</div>
+  if(hw.type!=="all"&&!counts[hw.type]) hw.type="all";
+  let h=hSuggestions();
+  if(!all.length) return h+`<div class="card empty-note">No workouts logged yet. Add them on the Log tab, or add one from your watch above.</div>`;
+  return h+`<div class="card"><input id="hq" type="search" placeholder="Search: run, October, treadmill, notes…" value="${esc(hw.q)}">
+    <div class="chips" style="margin-top:10px">${[["all","All"],...types.map(t=>[t,t])].map(([v,l])=>`<button class="chip ${hw.type===v?"on":""}" data-hwtype="${esc(v)}">${esc(l)}${v!=="all"?` <span style="opacity:.6">${counts[v]}</span>`:""}</button>`).join("")}</div>
     <div class="row" style="margin-top:10px;gap:8px"><div class="seg" style="flex:2.2">${[["month",MO[new Date().getMonth()]],["30","30d"],["90","90d"],["365","1y"],["all","All"]].map(([v,l])=>`<button data-hwper="${v}" class="${hw.period===v?"on":""}">${l}</button>`).join("")}</div>
     <select id="hsort" style="flex:1">${[["new","Newest"],["old","Oldest"],["dist","Longest distance"],["dur","Longest time"],["pace","Fastest pace"],["hr","Highest heart rate"]].map(([v,l])=>`<option value="${v}" ${hw.sort===v?"selected":""}>${l}</option>`).join("")}</select></div></div>
-    ${hidden?`<div class="small muted" style="margin:-4px 4px 10px">${hidden} auto-detected workout${hidden>1?"s":""} hidden · <span class="link" data-hact="settings">change</span></div>`:""}
     <div id="hwlist">${hWorkoutList()}</div>`;
 }
 function hWorkoutList(){
   const L=hFiltered();
-  if(!L.length) return `<div class="card empty-note">No workouts match.</div>`;
-  const mi=L.reduce((a,w)=>a+hMi(w),0), sec=L.reduce((a,w)=>a+hDur(w),0), hrs=L.filter(w=>w.st&&w.st.hra), cal=L.reduce((a,w)=>a+((w.st||{}).acal||0),0);
-  let h=`<div class="card"><div class="stats" style="margin:0">${stat("Workouts",L.length)}${stat("Miles",r1(mi))}${stat("Time",hDurLabel(sec))}</div>
-    <div class="stats" style="margin:8px 0 0">${stat("Avg HR",hrs.length?Math.round(hrs.reduce((a,w)=>a+w.st.hra*hDur(w),0)/hrs.reduce((a,w)=>a+hDur(w),0)):"—")}${stat("Active cal",cal?Math.round(cal).toLocaleString():"—")}${stat("Per week",r1(L.length/Math.max(1,(Math.max(...L.map(w=>w.s))-Math.min(...L.map(w=>w.s)))/(7*DAY)||1)))}</div>`;
-  // minutes per week (or month for long ranges)
-  const span=(Date.now()-Math.min(...L.map(w=>w.s)))/DAY, monthly=span>200;
-  const bucket=w=>{ const d=parseKey(w.d); if(monthly) return keyOf(new Date(d.getFullYear(),d.getMonth(),1)); d.setDate(d.getDate()-((d.getDay()+6)%7)); return keyOf(d); };
-  const agg={}; L.forEach(w=>{ const b=bucket(w); agg[b]=(agg[b]||0)+hDur(w)/60; });
-  const bks=[]; let k=bucket({d:keyOf(new Date(Math.min(...L.map(w=>w.s))))}); const end=bucket({d:todayKey()});
-  while(k<=end && bks.length<400){ bks.push(k); const d=parseKey(k); k = monthly? keyOf(new Date(d.getFullYear(),d.getMonth()+1,1)) : addDays(k,7); }
-  if(bks.length>1) h+=`<div style="margin-top:12px;font-weight:700;font-size:14px">Minutes per ${monthly?"month":"week"}</div>`+tsChart([{pts:bks.map((b,i)=>[i,agg[b]||0]),bars:true,color:"var(--pro)"}],{h:110,min:0,xmax:bks.length-1,ticks:Math.min(4,bks.length-1),xl:i=>{ const d=parseKey(bks[Math.round(i)]); return monthly? MO[d.getMonth()]+(d.getMonth()===0?" "+String(d.getFullYear()).slice(2):"") : shortD(bks[Math.round(i)]); }});
+  if(!L.length) return `<div class="card empty-note">No logged workouts match.</div>`;
+  const mi=L.reduce((a,x)=>a+(x.e.distance||0),0), sec=L.reduce((a,x)=>a+(x.e.time||0),0);
+  const runs=L.filter(x=>/run/i.test(x.e.type)&&lPace(x)), rp=runs.length? runs.reduce((a,x)=>a+x.e.time,0)/runs.reduce((a,x)=>a+x.e.distance,0) : null;
+  const ws=L.map(hMatchW).filter(w=>w&&w.st&&w.st.hra), hra=ws.length? Math.round(ws.reduce((a,w)=>a+w.st.hra*hDur(w),0)/ws.reduce((a,w)=>a+hDur(w),0)) : null;
+  const ks=L.map(x=>x.k).sort(), weeks=Math.max(1,(parseKey(todayKey())-parseKey(ks[0]))/(7*DAY));
+  let h=`<div class="card"><div class="stats" style="margin:0">${stat("Workouts",L.length)}${stat("Miles",r1(mi))}${stat("Time",sec?hDurLabel(sec):"—")}</div>
+    <div class="stats" style="margin:8px 0 0">${stat("Run pace",rp?fmtTime(rp)+"/mi":"—")}${stat("Avg HR",hra||"—")}${stat("Per week",r1(L.length/weeks))}</div>`;
+  const monthly=(parseKey(todayKey())-parseKey(ks[0]))/DAY>200;
+  const bucket=k=>{ const d=parseKey(k); if(monthly) return keyOf(new Date(d.getFullYear(),d.getMonth(),1)); d.setDate(d.getDate()-((d.getDay()+6)%7)); return keyOf(d); };
+  const agg={}; L.forEach(x=>{ const b=bucket(x.k); agg[b]=(agg[b]||0)+(x.e.distance||0); });
+  const bks=[]; let k=bucket(ks[0]); const end=bucket(todayKey());
+  while(k<=end&&bks.length<400){ bks.push(k); const d=parseKey(k); k=monthly? keyOf(new Date(d.getFullYear(),d.getMonth()+1,1)) : addDays(k,7); }
+  if(bks.length>1&&mi>0) h+=`<div style="margin-top:12px;font-weight:700;font-size:14px">Miles per ${monthly?"month":"week"}</div>`+tsChart([{pts:bks.map((b,i)=>[i,agg[b]||0]),bars:true,color:"var(--pro)"}],{h:110,min:0,xmax:bks.length-1,ticks:Math.min(4,bks.length-1),fmt:v=>r1(v),xl:i=>{ const d=parseKey(bks[Math.round(i)]); return monthly? MO[d.getMonth()]+(d.getMonth()===0?" "+String(d.getFullYear()).slice(2):"") : shortD(bks[Math.round(i)]); }});
   h+=`</div>`;
-  // grouped by month when sorted by date
   const byDate=hw.sort==="new"||hw.sort==="old"; let lastM="", open=false;
-  L.slice(0,300).forEach(w=>{ const m=w.d.slice(0,7);
-    if(byDate&&m!==lastM){ if(open) h+=`</ul></div>`; const [y,mm]=m.split("-").map(Number), ms=L.filter(x=>x.d.startsWith(m)); h+=`<div class="card"><h2>${MO[mm-1]} ${y}<span class="r">${ms.length} · ${r1(ms.reduce((a,x)=>a+hMi(x),0))} mi</span></h2><ul class="list">`; open=true; lastM=m; }
+  L.slice(0,300).forEach(x=>{ const m=x.k.slice(0,7);
+    if(byDate&&m!==lastM){ if(open) h+=`</ul></div>`; const [y,mm]=m.split("-").map(Number), ms=L.filter(z=>z.k.startsWith(m)); h+=`<div class="card"><h2>${MO[mm-1]} ${y}<span class="r">${ms.length} · ${r1(ms.reduce((a,z)=>a+(z.e.distance||0),0))} mi</span></h2><ul class="list">`; open=true; lastM=m; }
     else if(!byDate&&!open){ h+=`<div class="card"><ul class="list">`; open=true; }
-    h+=hWItem(w); });
+    h+=hLItem(x); });
   if(open) h+=`</ul></div>`;
   if(L.length>300) h+=`<div class="small muted" style="text-align:center">Showing the first 300. Narrow the search to see more.</div>`;
   return h;
 }
+function hLItem(x){ const w=hMatchW(x), hr=w&&w.st&&w.st.hra;
+  return `<li data-hlog="${x.k}#${x.i}" style="cursor:pointer"><span class="chk on" style="background:${/run/i.test(x.e.type)?"var(--carb)":/walk|ruck|hike/i.test(x.e.type)?"var(--fat)":/bike|cycl/i.test(x.e.type)?"var(--med)":"var(--accent)"};border:0;font-size:11px">${esc(x.e.type.slice(0,2))}</span><div class="main"><div class="t">${esc(x.e.type)}</div><div class="s">${esc(nice(x.k))}${hr?" · ♥ "+hr:""}</div><div class="s">${esc(exSummary(x.e))||"—"}</div></div><span class="muted">›</span></li>`; }
 function hWItem(w){ const inLog=hInLog(w);
   return `<li data-hw="${esc(w.id)}" style="cursor:pointer"><span class="chk on" style="background:${hColor(w.t)};border:0;font-size:11px">${esc(hType(w).slice(0,2))}</span><div class="main"><div class="t">${esc(hName(w))} ${inLog?'<span class="badge good" style="font-size:10px">in log</span>':""}</div><div class="s">${esc(nice(w.d))} · ${clock(w.s)}${w.st?"":" · loading…"}</div><div class="s">${esc(hWLine(w))}</div></div><span class="muted">›</span></li>`; }
+/* one logged workout: your entry first, then your watch's recording of it if there is one */
+async function hOpenLogged(key){
+  const [k,i]=key.split("#"), x={k,i:+i,e:(S.days[k]&&S.days[k].exercises||[])[+i]}; if(!x.e) return;
+  const w=hMatchW(x), e=x.e, cells=[];
+  if(e.distance) cells.push(["Distance",r1(e.distance)<10?Math.round(e.distance*100)/100+" mi":r1(e.distance)+" mi"]);
+  if(e.time) cells.push(["Time",fmtTime(e.time)]);
+  if(lPace(x)) cells.push(["Pace",fmtTime(lPace(x))+"/mi"]);
+  if(e.location) cells.push(["Where",e.location==="Machine"?(e.machine||"Machine"):e.location]);
+  if(e.load) cells.push(["Carried",e.load+" lb"]); if(e.floors) cells.push(["Floors",e.floors]);
+  // compared with your other logged ones of the same type and distance
+  let cmp=""; const sim=hLogged().filter(z=>z.e.type===e.type&&(e.distance? z.e.distance&&Math.abs(z.e.distance-e.distance)/e.distance<=0.2 : e.time&&z.e.time&&Math.abs(z.e.time-e.time)/e.time<=0.25)).sort((a,b)=>a.k.localeCompare(b.k));
+  if(sim.length>1){ const byPace=!!lPace(x), key2=z=>byPace? (lPace(z)||1e9) : -(z.e.time||0), rank=sim.slice().sort((a,b)=>key2(a)-key2(b)).findIndex(z=>z.k===x.k&&z.i===x.i)+1;
+    const ord=n=>n+(n%10===1&&n!==11?"st":n%10===2&&n!==12?"nd":n%10===3&&n!==13?"rd":"th");
+    cmp=`<div class="card"><h2>Compared with your log</h2><p style="margin:0 0 6px"><b>${rank===1?(byPace?"Your fastest":"Your longest"):ord(rank)+(byPace?" fastest":" longest")}</b> of ${sim.length} ${esc(e.type.toLowerCase())}s ${e.distance?"around "+r1(e.distance)+" mi":"of similar length"}.</p>`
+      +(byPace&&sim.filter(lPace).length>2? tsChart([{pts:sim.filter(lPace).map(z=>[parseKey(z.k).getTime(),lPace(z)/60]),color:"var(--carb)",dots:true,w:1}],{h:110,xmin:parseKey(sim[0].k).getTime(),xmax:parseKey(sim[sim.length-1].k).getTime(),invert:true,fmt:v=>fmtTime(v*60),ticks:2,xl:t=>shortD(keyOf(new Date(t)))}) : "")
+      +`<table class="mtab"><thead><tr><th>Date</th><th>Dist</th><th>Time</th><th>Pace</th></tr></thead><tbody>`+sim.slice().reverse().slice(0,12).map(z=>`<tr data-hlog="${z.k}#${z.i}" style="cursor:pointer;${z.k===x.k&&z.i===x.i?"color:var(--accent)":""}"><td>${shortD(z.k)}${z.k.slice(0,4)!==todayKey().slice(0,4)?"/"+z.k.slice(2,4):""}</td><td>${z.e.distance?r1(z.e.distance):"—"}</td><td>${z.e.time?fmtTime(z.e.time):"—"}</td><td>${lPace(z)?fmtTime(lPace(z)):"—"}</td></tr>`).join("")+`</tbody></table></div>`; }
+  sheet(`<div class="row" style="align-items:flex-start"><div style="flex:1;min-width:0"><h3>${esc(e.type)}</h3><div class="small muted">${esc(fullDate(k))} · from your log</div></div><button class="iconbtn" data-hclose aria-label="Close" style="flex:none">×</button></div>
+    ${cells.length?`<div class="stats" style="margin-top:12px">${cells.map(c=>stat(c[0],c[1])).join("")}</div>`:""}
+    ${e.sets?`<p class="small" style="margin:0 0 6px">${esc(e.sets)}</p>`:""}${e.notes?`<p class="small" style="margin:0 0 10px;white-space:pre-wrap">${esc(e.notes)}</p>`:""}
+    <button class="btn sec" data-hedit style="margin-bottom:12px">Edit in log</button>
+    ${w?`<div style="font-weight:700;margin:6px 2px 8px">Recorded by your watch <span class="small muted" style="font-weight:500">${clock(w.s)}–${clock(w.e)}</span></div><div id="hwd" data-embed="1">${hWorkoutHtml(w,hDetail[w.id]||null,true)}</div>`:`<p class="small muted">No matching watch recording, so there's no heart rate or route for this one.</p>`}
+    ${cmp}`, el=>{
+    el.querySelector("[data-hclose]").onclick=()=>{ closeSheet(); render(); };
+    el.querySelector("[data-hedit]").onclick=()=>{ closeSheet(); cur=k; tab="today"; render(); exerciseSheet(x.i); };
+    el.querySelectorAll("tr[data-hlog]").forEach(b=>b.onclick=()=>{ if(b.dataset.hlog!==key) hOpenLogged(b.dataset.hlog); });
+    if(w) hBindWorkout(el,w);
+  });
+  if(w){ if(!w.st){ const r=await hCallT(120000,"hcStats", JSON.stringify([{id:w.id,s:w.s,e:w.e}])); if(!r.error){ w.st=r[w.id]||{}; hSave(); } }
+    if(!hDetail[w.id]) hDetail[w.id]=await hCallT(120000,"hcDetail", w.id, w.s, w.e); hRedrawWorkout(w); }
+}
 function hColor(t){ return PACE_T.has(t)?"var(--carb)":SPEED_T.has(t)?"var(--med)":[45,55,8,20,6].includes(t)?"var(--accent)":[57,46,27,17].includes(t)?"var(--good)":"var(--fat)"; }
 
 /* --- one workout --- */
@@ -1210,7 +1257,7 @@ async function hOpenWorkout(id){
   if(!hDetail[id]) hDetail[id]=await hCallT(120000,"hcDetail", w.id, w.s, w.e);
   hRedrawWorkout(w);
 }
-function hRedrawWorkout(w){ const el=document.getElementById("hwd"); if(!el) return; el.innerHTML=hWorkoutHtml(w,hDetail[w.id]); hBindWorkout(el.parentNode,w); }
+function hRedrawWorkout(w){ const el=document.getElementById("hwd"); if(!el) return; el.innerHTML=hWorkoutHtml(w,hDetail[w.id],!!el.dataset.embed); hBindWorkout(el.parentNode,w); }
 window.onHealthRoute=(id,json)=>{ const w=H.workouts[id]; if(!w) return; if(json){ try{ const det=hDetail[id]||(hDetail[id]={}); det.route=JSON.parse(json); delete det.routeStatus; }catch(e){} } else toast("Route not shared"); hRedrawWorkout(w); };
 function hav(a,b){ const R=6371000, t=Math.PI/180, dLa=(b[1]-a[1])*t, dLo=(b[2]-a[2])*t, x=Math.sin(dLa/2)**2+Math.cos(a[1]*t)*Math.cos(b[1]*t)*Math.sin(dLo/2)**2; return 2*R*Math.asin(Math.sqrt(x)); }
 /* cumulative distance over time: GPS route first, else the distance records of the app that recorded the workout */
@@ -1259,9 +1306,9 @@ function hSimilar(w){
   const mi=hMi(w), dur=hDur(w);
   return hWs().filter(x=>x.t===w.t&&x.st&&(mi>=0.25? Math.abs(hMi(x)-mi)/mi<=0.2 : Math.abs(hDur(x)-dur)/dur<=0.25)).sort((a,b)=>a.s-b.s);
 }
-function hWorkoutHtml(w,det){
+function hWorkoutHtml(w,det,embed){
   const st=w.st||{}, mi=hMi(w), dur=hDur(w), maxHr=hMaxHr();
-  let h=`<div class="row" style="align-items:flex-start"><div style="flex:1;min-width:0"><h3>${esc(hName(w))}</h3><div class="small muted">${esc(fullDate(w.d))} · ${clock(w.s)}–${clock(w.e)}</div><div class="small muted">${esc([srcName(w.src),w.dev].filter(Boolean).join(" · "))}</div></div><button class="iconbtn" data-hclose aria-label="Close" style="flex:none">×</button></div>`;
+  let h= embed? "" : `<div class="row" style="align-items:flex-start"><div style="flex:1;min-width:0"><h3>${esc(hName(w))}</h3><div class="small muted">${esc(fullDate(w.d))} · ${clock(w.s)}–${clock(w.e)}</div><div class="small muted">${esc([srcName(w.src),w.dev].filter(Boolean).join(" · "))}</div></div><button class="iconbtn" data-hclose aria-label="Close" style="flex:none">×</button></div>`;
   const cells=[];
   if(mi>=0.05) cells.push(["Distance",(mi<10?Math.round(mi*100)/100:r1(mi))+" mi"]);
   cells.push(["Duration",fmtTime(dur)]);
@@ -1272,9 +1319,9 @@ function hWorkoutHtml(w,det){
   if(st.steps&&dur>120&&PACE_T.has(w.t)) cells.push(["Cadence",Math.round(st.steps/(dur/60))+" spm"]);
   if(st.elev) cells.push(["Elev gain",Math.round(st.elev*FT)+" ft"]);
   if(SPEED_T.has(w.t)&&st.spx) cells.push(["Top speed",r1(st.spx/MI*3600)+" mph"]);
-  h+=`<div class="stats" style="margin-top:12px">${cells.map(c=>stat(c[0],c[1])).join("")}</div>`;
+  h+=`<div class="stats" style="margin-top:${embed?0:12}px">${cells.map(c=>stat(c[0],c[1])).join("")}</div>`;
   if(w.no) h+=`<p class="small" style="margin:0 0 10px;white-space:pre-wrap">${esc(w.no)}</p>`;
-  h+=`<div class="row" style="gap:8px;margin-bottom:12px">${hInLog(w)?`<button class="btn sec" data-hgoday="${w.d}">✓ In your log · open day</button>`:`<button class="btn" data-hadd="${esc(w.id)}">+ Add to Karteria log</button>`}</div>`;
+  if(!embed) h+=`<div class="row" style="gap:8px;margin-bottom:12px">${hInLog(w)?`<button class="btn sec" data-hgoday="${w.d}">✓ In your log · open day</button>`:`<button class="btn" data-hadd="${esc(w.id)}">+ Add to Karteria log</button>`}</div>`;
   if(!det) return h+`<div class="card empty-note" style="background:var(--soft)">Loading heart rate, splits and route…</div>`;
   if(det.error) return h+`<div class="card empty-note">Couldn't load details (${esc(det.error==="rate"?"Health Connect asked for a pause; try again shortly":det.error)}).</div>`;
   const cum=hCum(w,det), hr=det.hr||[];
@@ -1304,7 +1351,7 @@ function hWorkoutHtml(w,det){
     h+=`</div>`;
   } else if(det.routeStatus==="consent") h+=`<div class="card"><h2>Route</h2><p class="small muted" style="margin-top:0">This workout has a GPS route. Health Connect asks before sharing each one.</p><button class="btn sec" data-hroute>Show route</button></div>`;
   // compared with similar workouts
-  const sim=hSimilar(w);
+  const sim=embed? [] : hSimilar(w);
   if(sim.length>1){ const byPace=hasPaceW(w), key=x=>byPace? hDur(x)/hMi(x) : -hDur(x), ranked=sim.slice().sort((a,b)=>key(a)-key(b)), rank=ranked.findIndex(x=>x.id===w.id)+1;
     const ord=n=>n+(n%10===1&&n!==11?"st":n%10===2&&n!==12?"nd":n%10===3&&n!==13?"rd":"th");
     h+=`<div class="card"><h2>Compared with similar</h2><p style="margin:0 0 6px"><b>${rank===1?(byPace?"Your fastest":"Your longest"):ord(rank)+(byPace?" fastest":" longest")}</b> of ${sim.length} ${esc(hType(w).toLowerCase())}s ${mi>=0.25?"around "+r1(mi)+" mi":"of similar length"}.</p>`;
@@ -1495,8 +1542,7 @@ function hSettingsSheet(){
     <p class="small muted" style="margin:4px 0 0">Heart-rate zones use your max heart rate. Blank uses the highest reading from your workouts${mx.set?"":" ("+mx.v+")"}.</p>
     <label class="f">How far back to read</label><div class="seg" id="hs-hist">${[["1y","1 year"],["2y","2 years"],["5y","5 years"],["all","All"]].map(([v,l])=>`<button data-v="${v}" class="${(st.history||"2y")===v?"on":""}">${l}</button>`).join("")}</div>
     ${H.lastSync&&!H.hist?`<p class="small muted" style="margin:6px 0 0">Health Connect is only sharing recent data. To see older history, allow <b>past data</b> for Karteria in Health Connect (Android 15 and newer).</p>`:""}
-    <label class="row" style="gap:10px;margin-top:14px;align-items:flex-start"><input type="checkbox" id="hs-aw2" ${st.autoWorkouts?"checked":""} style="width:22px;height:22px;flex:none;margin-top:2px"><span><b>Show auto-detected workouts</b><br><span class="small muted">Walks and runs your watch noticed on its own. Off: only workouts you started yourself.</span></span></label>
-    <label class="row" style="gap:10px;margin-top:10px;align-items:flex-start"><input type="checkbox" id="hs-ax" ${st.autoEx?"checked":""} style="width:22px;height:22px;flex:none;margin-top:2px"><span><b>Add new watch workouts to my log</b><br><span class="small muted">From today on. Older ones can be added one at a time with “+ Add”.</span></span></label>
+    <label class="row" style="gap:10px;margin-top:14px;align-items:flex-start"><input type="checkbox" id="hs-aw2" ${st.autoWorkouts?"checked":""} style="width:22px;height:22px;flex:none;margin-top:2px"><span><b>Show auto-detected workouts</b><br><span class="small muted">Walks and runs your watch noticed on its own, in the “From your watch” suggestions.</span></span></label>
     ${hCoverage()}
     ${Object.keys(srcs).length?`<p class="small muted" style="margin:14px 0 0">Workouts from: ${Object.entries(srcs).map(([k,v])=>esc(k)+" ("+v+")").join(", ")}</p>`:""}
     <div style="display:grid;gap:8px;margin-top:14px">${hOK()?`<button class="btn sec" id="hs-perm">Choose what Karteria can read</button><button class="btn sec" id="hs-full">Re-read everything</button>`:""}<button class="btn sec" id="hs-why">Privacy: what's read and why</button>${H.lastSync?`<button class="btn ghost" id="hs-clear" style="color:var(--bad)">Clear the cached copy on this phone</button>`:""}</div>
@@ -1504,8 +1550,8 @@ function hSettingsSheet(){
     let hist=st.history||"2y";
     el.querySelectorAll("#hs-hist button").forEach(b=>b.onclick=()=>{ hist=b.dataset.v; el.querySelectorAll("#hs-hist button").forEach(x=>x.classList.toggle("on",x===b)); });
     const commit=()=>{ st.maxHr=num(gv("hs-mx"))||undefined; st.stepGoal=num(gv("hs-sg"))||undefined; const histChanged=hist!==(st.history||"2y"); st.history=hist;
-      const ax=el.querySelector("#hs-ax").checked; st.autoWorkouts=el.querySelector("#hs-aw2").checked||undefined;
-      st.autoEx= ax? (st.autoEx||todayKey()) : undefined; delete st.autoW;
+      st.autoWorkouts=el.querySelector("#hs-aw2").checked||undefined;
+      delete st.autoEx; delete st.autoW;
       Object.keys(st).forEach(k=>st[k]===undefined&&delete st[k]); save(); hAutoImport(); return histChanged; };
     el.querySelector("#hs-done").onclick=()=>{ const ch=commit(); closeSheet(); render(); if(ch) hSync(true); };
     const q=s=>el.querySelector(s);
@@ -1543,11 +1589,15 @@ function hBind(q){
   q("[data-hact]").forEach(b=>b.onclick=e=>{ e.stopPropagation(); hAct(b.dataset.hact); });
   q("[data-htab]").forEach(b=>b.onclick=()=>{ hTab=b.dataset.htab; window.scrollTo(0,0); render(); });
   q("[data-hw]").forEach(b=>b.onclick=()=>hOpenWorkout(b.dataset.hw));
+  q("[data-hlog]").forEach(b=>b.onclick=()=>hOpenLogged(b.dataset.hlog));
+  q("[data-hskip]").forEach(b=>b.onclick=e=>{ e.stopPropagation(); const st=hs(), id=b.dataset.hskip; st.skip=(st.skip||[]).concat(id); save(); render();
+    toast("Suggestion dismissed",{label:"Undo",fn:()=>{ st.skip=st.skip.filter(z=>z!==id); save(); render(); }}); });
+  q("[data-hsugall]").forEach(b=>b.onclick=()=>{ hShowAllSug=true; const y=scrollY; render(); scrollTo(0,y); });
   q("[data-hadd]").forEach(b=>b.onclick=e=>{ e.stopPropagation(); const w=H.workouts[b.dataset.hadd]; if(w){ hAddToLog(w); render(); } });
   q("[data-huse]").forEach(b=>b.onclick=()=>{ const d=day(cur,true); if(b.dataset.huse==="w"){ d.weight=r1(H.vitals.weight[cur][0]*KG); } else d.bp={sys:Math.round(H.vitals.bps[cur][0]),dia:Math.round(H.vitals.bpd[cur][0])}; save(); render(); });
   q("[data-hwtype]").forEach(b=>b.onclick=()=>{ hw.type=b.dataset.hwtype; const y=scrollY; render(); scrollTo(0,y); });
   q("[data-hwper]").forEach(b=>b.onclick=()=>{ hw.period=b.dataset.hwper; const y=scrollY; render(); scrollTo(0,y); });
-  const hq=document.getElementById("hq"); if(hq) hq.oninput=()=>{ hw.q=hq.value; const L=document.getElementById("hwlist"); L.innerHTML=hWorkoutList(); L.querySelectorAll("[data-hw]").forEach(b=>b.onclick=()=>hOpenWorkout(b.dataset.hw)); };
+  const hq=document.getElementById("hq"); if(hq) hq.oninput=()=>{ hw.q=hq.value; const L=document.getElementById("hwlist"); L.innerHTML=hWorkoutList(); L.querySelectorAll("[data-hlog]").forEach(b=>b.onclick=()=>hOpenLogged(b.dataset.hlog)); };
   const hsort=document.getElementById("hsort"); if(hsort) hsort.onchange=()=>{ hw.sort=hsort.value; const y=scrollY; render(); scrollTo(0,y); };
   q("[data-hmet]").forEach(b=>b.onclick=()=>{ ha.metric=b.dataset.hmet; const y=scrollY; render(); scrollTo(0,y); });
   q("[data-hrng]").forEach(b=>b.onclick=()=>{ ha.range=b.dataset.hrng; ha.off=0; render(); });
