@@ -860,7 +860,7 @@ function viewSettings(){
   <div class="card"><h2>Your data</h2>
     <p class="small muted" style="margin-top:0">${Object.keys(S.days).length} days logged · stored only on this phone, and never copied to Google backups. ${S.settings.lastBackup?"Last backup: "+nice(keyOf(new Date(S.settings.lastBackup)))+".":"No backup saved yet."} The app reminds you if it's been 30 days.</p>
     <div style="display:grid;gap:8px"><button class="btn" data-act="export">Save backup file</button><button class="btn sec" data-act="import">Import backup file</button><button class="btn sec" data-act="csv">Export spreadsheet (CSV)</button><button class="btn danger" data-act="reset">Erase all data</button></div>
-  </div><p class="small muted" style="text-align:center">Karteria 2.7.7 · <i>karteria</i>, Stoic steadfast endurance</p></div>`;
+  </div><p class="small muted" style="text-align:center">Karteria 2.7.8 · <i>karteria</i>, Stoic steadfast endurance</p></div>`;
 }
 function itemSheet(kind,id){
   const K=KINDS[kind], x=id? items(kind).find(s=>s.id===id) : {name:"",dose:"",perDay:1};
@@ -988,7 +988,8 @@ async function hWindow(a,b,label){
   const probs=(r.errors||[]).concat(r.warnings||[]); H.syncErrors=probs.length?probs:null;
   if((r.warnings||[]).some(w=>/^heart/.test(w))) (H.heartRetry=H.heartRetry||[]).push([a,b]);   // heart rate gets another try later
   hSave();
-  if(r.errors){ hMsg = r.errors.some(e=>/rate$/.test(e))? "Health Connect asked Karteria to slow down. Tap ↻ in a few minutes." : "Some data couldn't be read. Keep Karteria open and tap ↻ to retry."; return false; }
+  if(r.errors){ if(r.errors.some(e=>/rate$/.test(e))){ hMsg="Health Connect asked Karteria to slow down. Tap ↻ in a few minutes."; return false; }
+    (H.retry=H.retry||[]).push([a,b]); hSave(); }   // read it again later; keep loading the rest
   return true;
 }
 async function hSync(full){
@@ -1003,6 +1004,7 @@ async function hSync(full){
     ok=await hWindow(a, H.backTo, "Loading history, "+monLabel(a)+":");
     if(ok){ H.backTo=a; hSave(); hPaint(true); }
   }
+  if(ok&&H.retry&&H.retry.length){ const R=H.retry; H.retry=[]; for(const [a,b] of R){ if(!ok) { H.retry.push([a,b]); continue; } ok=await hWindow(a,b,"Retrying "+monLabel(a)+":"); } if(H.retry.length) ok=false, hMsg="Some older data couldn't be read. Tap “Some data couldn't be read” for details, or ↻ to retry."; }
   if(ok) ok=await hHeartRetry();
   hBusy=false; if(ok) hMsg=""; hSave(); hPaint(); if(ok) hStatsQueue();
 }
@@ -1365,27 +1367,35 @@ vv("fat",v=>["Body fat",r1(v)+"%"]); vv("rhr",v=>["Resting HR",Math.round(v)]); 
 /* --- body & vitals --- */
 /* key, label, unit, convert, decimals, color, which way is better */
 const HVIT={
-  rhr:["Resting heart rate","bpm",v=>v,0,"var(--bad)","down"], rhrcalc:["Resting heart rate","bpm",v=>v,0,"var(--bad)","down"], hravg:["Average heart rate","bpm",v=>v,0,"var(--accent)","down"],
+  rhr:["Resting heart rate","bpm",v=>v,0,"var(--bad)","down"], rhrall:["Resting heart rate","bpm",v=>v,0,"var(--bad)","down"], rhrcalc:["Resting heart rate","bpm",v=>v,0,"var(--bad)","down"], hravg:["Average heart rate","bpm",v=>v,0,"var(--accent)","down"],
   hrsleep:["Sleeping heart rate","bpm",v=>v,0,"var(--med)","down"], hrlo:["Lowest heart rate","bpm",v=>v,0,"var(--carb)","down"],
   hrhi:["Highest heart rate","bpm",v=>v,0,"var(--bad)",null], hrv:["Heart rate variability","ms",v=>v,0,"var(--med)","up"],
   weight:["Weight","lb",v=>v*KG,1,"var(--accent)","down"], fat:["Body fat","%",v=>v,1,"var(--fat)","down"],
   spo2:["Blood oxygen (SpO₂)","%",v=>v,1,"var(--carb)","up"], resp:["Breathing rate","breaths/min",v=>v,1,"var(--good)",null],
   vo2:["VO₂ max (cardio fitness)","ml/kg/min",v=>v,1,"var(--pro)","up"]};
 const hvHas = m => H.vitals[m] && Object.keys(H.vitals[m]).length>0;
-function hvAvg(m,a,z){ const v=H.vitals[m]||{}, cv=HVIT[m][2], x=Object.keys(v).filter(k=>k>=a&&k<=z).map(k=>cv(v[k][0])); return x.length? x.reduce((p,q)=>p+q,0)/x.length : null; }
+let RHR={};   // resting heart rate by day: Google Health's value when shared, otherwise Karteria's calculation
+let RHR_OFF=0;
+function hRhrBuild(){
+  const G=H.vitals.rhr||{}, C=H.vitals.rhrcalc||{};
+  // the calculation runs a few beats below Google's number; where both exist, learn the typical gap and line the older days up with it
+  const d=Object.keys(G).filter(k=>C[k]).map(k=>G[k][0]-C[k][0]).sort((x,y)=>x-y);
+  RHR_OFF = d.length>=7? Math.round(d[Math.floor(d.length/2)]) : 0;
+  RHR={}; Object.entries(C).forEach(([k,v])=>RHR[k]=[v[0]+RHR_OFF,"c"]); Object.entries(G).forEach(([k,v])=>RHR[k]=[v[0],"g"]); }
+function hvAvg(m,a,z){ const v=(m==="rhrall"?RHR:H.vitals[m])||{}, cv=HVIT[m][2], x=Object.keys(v).filter(k=>k>=a&&k<=z).map(k=>cv(v[k][0])); return x.length? x.reduce((p,q)=>p+q,0)/x.length : null; }
 function hTrendsCard(){
   const tk=todayKey(), w0=addDays(tk,-6), p0=addDays(tk,-36), p1=addDays(tk,-7);
-  const rows=[hvHas("rhr")?"rhr":"rhrcalc","hravg","hrsleep","hrlo","hrv","spo2","resp","vo2"].filter(hvHas).map(m=>{
+  const rows=["rhrall","hravg","hrsleep","hrlo","hrv","spo2","resp","vo2"].filter(m=>m==="rhrall"?Object.keys(RHR).length>0:hvHas(m)).map(m=>{
     const [l,u,,dg,,better]=HVIT[m], now=hvAvg(m,w0,tk), before=hvAvg(m,p0,p1); if(now==null) return "";
     const f=v=>dg?r1(v):Math.round(v), ch=before!=null? now-before : null, flat=ch==null||Math.abs(ch)<(dg?0.2:1);
     const good= flat||!better ? null : (better==="down")===(ch<0);
-    const short={rhr:"Resting HR",rhrcalc:"Resting HR*",hravg:"Average HR",hrsleep:"Sleeping HR",hrlo:"Lowest HR",hrv:"HRV (ms)",weight:"Weight (lb)",spo2:"SpO₂ (%)",resp:"Breathing",vo2:"VO₂ max"}[m];
+    const short={rhr:"Resting HR",rhrall:"Resting HR",rhrcalc:"Resting HR*",hravg:"Average HR",hrsleep:"Sleeping HR",hrlo:"Lowest HR",hrv:"HRV (ms)",weight:"Weight (lb)",spo2:"SpO₂ (%)",resp:"Breathing",vo2:"VO₂ max"}[m];
     return `<tr><td>${short}</td><td><b>${f(now)}</b></td><td>${before!=null?f(before):"—"}</td><td style="color:${good==null?"var(--muted)":good?"var(--good)":"var(--bad)"}">${ch==null?"—":flat?"steady":(ch>0?"↑ ":"↓ ")+f(Math.abs(ch))}</td></tr>`; }).join("");
   if(!rows) return "";
-  return `<div class="card"><h2>Trends</h2><div class="small muted" style="margin-top:-4px">Your last 7 days compared with the 30 days before. Green is the healthy direction.</div><div style="overflow-x:auto"><table class="mtab"><thead><tr><th></th><th>Last 7d</th><th>Prior 30d</th><th>Change</th></tr></thead><tbody>${rows}</tbody></table></div>${!hvHas("rhr")&&hvHas("rhrcalc")?`<div class="small muted" style="margin-top:6px">* calculated by Karteria</div>`:""}</div>`;
+  return `<div class="card"><h2>Trends</h2><div class="small muted" style="margin-top:-4px">Your last 7 days compared with the 30 days before. Green is the healthy direction.</div><div style="overflow-x:auto"><table class="mtab"><thead><tr><th></th><th>Last 7d</th><th>Prior 30d</th><th>Change</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
 }
 function hVitalCard(m,from){
-  const [l,u,cv,dg,c]=HVIT[m], all=H.vitals[m]; if(!all||!Object.keys(all).length) return "";
+  const [l,u,cv,dg,c]=HVIT[m], all= m==="rhrall"? RHR : H.vitals[m]; if(!all||!Object.keys(all).length) return "";
   const ks=Object.keys(all).filter(k=>k>=from).sort(), last=Object.keys(all).sort().pop(), fv=v=>dg?r1(v):Math.round(v);
   if(!ks.length) return `<div class="card"><h2>${l}</h2><p class="small muted" style="margin:0">Last reading ${fv(cv(all[last][0]))} ${u} on ${fullDate(last)}.</p></div>`;
   const vals=ks.map(k=>cv(all[k][0])), avg=vals.reduce((a,b)=>a+b,0)/vals.length, k0=ks[0];
@@ -1404,10 +1414,14 @@ function hRangeCard(from){
     +`<div class="legend"><span><i style="background:var(--bad)"></i>Highest</span><span><i style="background:var(--accent)"></i>Average</span><span><i style="background:var(--carb)"></i>Lowest</span></div></div>`;
 }
 function hBody(){
+  hRhrBuild();
   const now=todayKey(), from= hb.range==="all"? "0000" : addDays(now,-(+hb.range));
   let h=`<div class="seg" style="margin-bottom:12px">${[["30","30d"],["90","90d"],["365","1y"],["all","All"]].map(([v,l])=>`<button data-hbr="${v}" class="${hb.range===v?"on":""}">${l}</button>`).join("")}</div>`;
   h+=hTrendsCard();
-  const rhrCard = hvHas("rhr")? hVitalCard("rhr",from) : hvHas("rhrcalc")? hVitalCard("rhrcalc",from).replace("</h2>",`</h2><div class="small muted" style="margin:-6px 0 8px">Calculated by Karteria from your heart-rate readings. <span class="link" data-hact="rhrhow">How?</span></div>`) : "";
+  const nG=Object.values(RHR).filter(x=>x[1]==="g").length, nC=Object.keys(RHR).length-nG, firstG=Object.keys(H.vitals.rhr||{}).sort()[0];
+  const rhrNote = !nC? "" : !nG? `Calculated by Karteria from your heart-rate readings. <span class="link" data-hact="rhrhow">How?</span>`
+    : `From Google Health since ${shortD(firstG)}; earlier days calculated by Karteria${RHR_OFF?` and adjusted ${RHR_OFF>0?"+":""}${RHR_OFF} bpm to match Google's readings`:""}. <span class="link" data-hact="rhrhow">How?</span>`;
+  const rhrCard = Object.keys(RHR).length? hVitalCard("rhrall",from).replace("</h2>",`</h2>${rhrNote?`<div class="small muted" style="margin:-6px 0 8px">${rhrNote}</div>`:""}`) : "";
   const heart=rhrCard+hVitalCard("hravg",from)+hRangeCard(from)+["hrsleep","hrv"].map(m=>hVitalCard(m,from)).join("");
   if(heart){ h+=`<div style="font-weight:700;margin:16px 4px 8px">Heart</div>`+heart;
     if(!hvHas("rhr")&&!hvHas("rhrcalc")&&hvHas("hravg")) h+=`<div class="small muted" style="margin:-4px 4px 12px">Resting heart rate appears after the next full sync. Tap ↻ and keep Karteria open.</div>`; }
@@ -1471,6 +1485,7 @@ function hSettingsSheet(){
     <label class="f">How far back to read</label><div class="seg" id="hs-hist">${[["1y","1 year"],["2y","2 years"],["5y","5 years"],["all","All"]].map(([v,l])=>`<button data-v="${v}" class="${(st.history||"2y")===v?"on":""}">${l}</button>`).join("")}</div>
     ${H.lastSync&&!H.hist?`<p class="small muted" style="margin:6px 0 0">Health Connect is only sharing recent data. To see older history, allow <b>past data</b> for Karteria in Health Connect (Android 15 and newer).</p>`:""}
     <label class="row" style="gap:10px;margin-top:14px;align-items:flex-start"><input type="checkbox" id="hs-ax" ${st.autoEx?"checked":""} style="width:22px;height:22px;flex:none;margin-top:2px"><span><b>Add new watch workouts to my log</b><br><span class="small muted">From today on. Older ones can be added one at a time with “+ Add”.</span></span></label>
+    ${hCoverage()}
     ${Object.keys(srcs).length?`<p class="small muted" style="margin:14px 0 0">Workouts from: ${Object.entries(srcs).map(([k,v])=>esc(k)+" ("+v+")").join(", ")}</p>`:""}
     <div style="display:grid;gap:8px;margin-top:14px">${hOK()?`<button class="btn sec" id="hs-perm">Choose what Karteria can read</button><button class="btn sec" id="hs-full">Re-read everything</button>`:""}<button class="btn sec" id="hs-why">Privacy: what's read and why</button>${H.lastSync?`<button class="btn ghost" id="hs-clear" style="color:var(--bad)">Clear the cached copy on this phone</button>`:""}</div>
     <button class="btn full" style="margin-top:12px" id="hs-done">Done</button>`, el=>{
@@ -1487,6 +1502,16 @@ function hSettingsSheet(){
     q("#hs-why").onclick=()=>{ commit(); hPrivacySheet(); };
     if(q("#hs-clear")) q("#hs-clear").onclick=()=>askConfirm("Clear cached health data?","This only removes Karteria's copy. Your data in Health Connect isn't touched, and it's read again on the next sync.","Clear",true,()=>{ H=hBlank(); hSave(); if(!NATIVE) demoOff(); closeSheet(); render(); });
   });
+}
+function hCoverage(){
+  if(!H.lastSync) return "";
+  const span=(keys,label)=>{ const ks=keys.sort(); return ks.length? `<tr><td>${label}</td><td>${fullDate(ks[0])}</td><td>${ks.length}</td></tr>` : `<tr><td>${label}</td><td class="muted">none</td><td>0</td></tr>`; };
+  const V=H.vitals, rows=[span(Object.values(H.workouts).map(w=>w.d),"Workouts"), span(Object.keys(H.days),"Daily activity"), span(Object.values(H.sleep).map(x=>x.d),"Sleep"),
+    span(Object.keys(V.hravg||{}),"Heart rate"), span(Object.keys(V.rhr||{}),"Resting HR (Google)"), span(Object.keys(V.rhrcalc||{}),"Resting HR (calculated)"), span(Object.keys(V.hrv||{}),"HRV")];
+  ["spo2","resp","vo2","fat"].forEach(m=>{ if(hvHas(m)) rows.push(span(Object.keys(V[m]),HVIT[m][0].replace(/ \(.*\)/,""))); });
+  return `<div style="font-weight:700;margin:16px 0 4px">What's loaded</div><div class="small muted">Past data ${hGranted.includes("READ_HEALTH_DATA_HISTORY")?"allowed":"<b>not allowed</b>"} · reading back to ${H.backTo?fullDate(keyOf(new Date(H.backTo))):"—"}${(H.retry||[]).length?` · ${H.retry.length} period(s) waiting to retry`:""}</div>
+    <table class="mtab"><thead><tr><th>Data</th><th>Earliest</th><th>Days</th></tr></thead><tbody>${rows.join("")}</tbody></table>
+    ${H.syncErrors?`<div class="small" style="margin-top:6px;color:var(--bad)">Last problem: ${esc(H.syncErrors.join(" · "))}</div>`:""}`;
 }
 function hAct(a){
   if(a==="connect"){ if(HC) HC.hcRequest(); }
