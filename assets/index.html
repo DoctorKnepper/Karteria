@@ -860,7 +860,7 @@ function viewSettings(){
   <div class="card"><h2>Your data</h2>
     <p class="small muted" style="margin-top:0">${Object.keys(S.days).length} days logged · stored only on this phone, and never copied to Google backups. ${S.settings.lastBackup?"Last backup: "+nice(keyOf(new Date(S.settings.lastBackup)))+".":"No backup saved yet."} The app reminds you if it's been 30 days.</p>
     <div style="display:grid;gap:8px"><button class="btn" data-act="export">Save backup file</button><button class="btn sec" data-act="import">Import backup file</button><button class="btn sec" data-act="csv">Export spreadsheet (CSV)</button><button class="btn danger" data-act="reset">Erase all data</button></div>
-  </div><p class="small muted" style="text-align:center">Karteria 2.7.5 · <i>karteria</i>, Stoic steadfast endurance</p></div>`;
+  </div><p class="small muted" style="text-align:center">Karteria 2.7.6 · <i>karteria</i>, Stoic steadfast endurance</p></div>`;
 }
 function itemSheet(kind,id){
   const K=KINDS[kind], x=id? items(kind).find(s=>s.id===id) : {name:"",dose:"",perDay:1};
@@ -983,7 +983,9 @@ async function hWindow(a,b,label){
   if(r.error){ hMsg = r.error==="rate"? "Health Connect asked Karteria to slow down. Try again in a few minutes." : "Couldn't read Health Connect ("+r.error+")"; return false; }
   if(r.heart) r.vitals=Object.assign(r.vitals||{}, r.heart);
   hMerge(r,a,b);
-  const probs=(r.errors||[]).concat(r.warnings||[]); H.syncErrors=probs.length?probs:null; hSave();
+  const probs=(r.errors||[]).concat(r.warnings||[]); H.syncErrors=probs.length?probs:null;
+  if((r.warnings||[]).some(w=>/^heart/.test(w))) (H.heartRetry=H.heartRetry||[]).push([a,b]);   // heart rate gets another try later
+  hSave();
   if(r.errors){ hMsg = r.errors.some(e=>/rate$/.test(e))? "Health Connect asked Karteria to slow down. Tap ↻ in a few minutes." : "Some data couldn't be read. Keep Karteria open and tap ↻ to retry."; return false; }
   return true;
 }
@@ -993,13 +995,25 @@ async function hSync(full){
   if(full) H.backTo=null;
   const recentFrom = H.lastSync&&!full&&H.backTo!=null ? Math.max(deep,H.lastSync-3*DAY) : Math.max(deep,now-30*DAY);
   let ok=await hWindow(recentFrom, now, "Reading recent data:");
-  if(ok){ H.lastSync=now; H.hist=hist; H.heartV=2; if(H.backTo==null||H.backTo>recentFrom) H.backTo=recentFrom; hSave(); hAutoImport(); hMsg=""; hPaint(); hStatsQueue(); }
+  if(ok){ H.lastSync=now; H.hist=hist; H.heartV=3; if(H.backTo==null||H.backTo>recentFrom) H.backTo=recentFrom; hSave(); hAutoImport(); hMsg=""; hPaint(); hStatsQueue(); }
   while(ok && H.backTo>deep+DAY){
     const a=Math.max(deep,H.backTo-SYNC_STEP);
     ok=await hWindow(a, H.backTo, "Loading history, "+monLabel(a)+":");
     if(ok){ H.backTo=a; hSave(); hPaint(true); }
   }
+  if(ok) ok=await hHeartRetry();
   hBusy=false; if(ok) hMsg=""; hSave(); hPaint(); if(ok) hStatsQueue();
+}
+/* Heart-rate trends for windows where they couldn't be read the first time (slow reads or Health Connect asking for a pause). */
+async function hHeartRetry(){
+  while(H.heartRetry&&H.heartRetry.length){
+    const [a,b]=H.heartRetry[H.heartRetry.length-1];
+    hSyncLabel="Filling in heart rate, "+monLabel(a)+":"; hMsg=hSyncLabel.replace(/:$/,"")+"…"; hPaint(true);
+    const r=await hCallT(4*60000,"hcHeart",a,b);
+    if(r.timeout||r.error||!r.heart){ hMsg = r.error==="rate"? "Health Connect asked for a pause. Heart-rate history will finish on the next sync." : "Some heart-rate history is still missing. Keep Karteria open and tap ↻ to finish it."; hSave(); return false; }
+    hMerge({vitals:r.heart},a,b); H.heartRetry.pop(); hSave(); hPaint(true);
+  }
+  return true;
 }
 function hMerge(r, from, to){
   const k0=keyOf(new Date(from)), k1=keyOf(new Date(to)), inK=k=>k>=k0&&k<=k1, inT=x=>x.s>=from&&x.s<=to;
@@ -1507,7 +1521,9 @@ function hBind(q){
 }
 // keep data fresh: on launch and whenever the app comes back to the front
 setTimeout(()=>{ hRefreshGranted(); if(!hOK()||!S.settings.onboarded) return;
-  if(H.lastSync&&(H.heartV||0)<2){ H.heartV=2; H.backTo=null; H.lastSync=0; hSave(); hSync(true); }   // re-read once so heart-rate trends fill in
+  if(H.lastSync&&(H.heartV||0)<3){   // re-read heart rate once (older windows could have been skipped before)
+    const now=Date.now(), from=H.backTo||now-30*DAY; H.heartRetry=[]; for(let z=now; z>from; z-=SYNC_STEP) H.heartRetry.unshift([Math.max(from,z-SYNC_STEP),z]);
+    H.heartV=3; hSave(); hSync(false); }
   else if(Date.now()-H.lastSync>15*60000) hSync(false); else hStatsQueue(); }, 600);
 
 /* ---------- demo Health Connect for working on the page in a desktop browser (never used in the Android app) ---------- */
@@ -1575,6 +1591,7 @@ function demoHC(){
       reply(id,{days:Object.entries(DB.days).filter(([k])=>k>=k0).map(([k,v])=>Object.assign({d:k},v)),
         workouts:DB.W.filter(inT).map(w=>{ const o=Object.assign({},w); delete o.p; delete o.seed; delete o.stx; delete o.route; return o; }),
         vitals:vit, sleep:DB.SL.filter(inT)}); },
+    hcHeart:(id)=>reply(id,{heart:{}}),
     hcStats:(id,json)=>{ if(!DB) build(); const out={}; JSON.parse(json).forEach(x=>{ const w=DB.W.find(y=>y.id===x.id); out[x.id]=w? JSON.parse(JSON.stringify(w.stx)) : {}; }); reply(id,out); },
     hcDetail:(id,sid)=>{ if(!DB) build(); const w=DB.W.find(y=>y.id===sid); reply(id, w? detail(w) : {error:"not found"}); },
     hcRoute:(sid)=>{ const w=DB&&DB.W.find(y=>y.id===sid); setTimeout(()=>window.onHealthRoute(sid, w&&w.route? JSON.stringify(w.route) : null),300); }

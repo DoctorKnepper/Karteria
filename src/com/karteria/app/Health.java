@@ -361,10 +361,17 @@ final class Health {
         // lowest 30-minute average outside workouts. Heart rate is averaged in 5-minute blocks by Health Connect.
         JSONArray calc = new JSONArray();
         java.util.Set<String> done = new java.util.HashSet<>();
+        // all 5-minute blocks for the window, fetched a few days at a time (a handful of calls instead of one per night)
+        List<double[]> all = new ArrayList<>();
+        Instant t0 = start.atStartOfDay(zone).toInstant().minusSeconds(12 * 3600), tEnd = end.atStartOfDay(zone).toInstant();
+        for (Instant a = t0; a.isBefore(tEnd); a = a.plusSeconds(5 * 86400L)) {
+            Instant z = a.plusSeconds(5 * 86400L).isBefore(tEnd) ? a.plusSeconds(5 * 86400L) : tEnd;
+            reply.progress(id, "resting heart rate, " + a.atZone(zone).toLocalDate().toString().substring(5));
+            all.addAll(blocks(a, z));
+        }
         if (has("READ_SLEEP")) {
-            reply.progress(id, "resting heart rate");
             Map<String, SleepSessionRecord> mainSleep = new TreeMap<>();
-            for (SleepSessionRecord s : readAll(SleepSessionRecord.class, from, to)) {
+            for (SleepSessionRecord s : readAll(SleepSessionRecord.class, t0, tEnd)) {
                 if (s.getEndTime().getEpochSecond() - s.getStartTime().getEpochSecond() < 3 * 3600) continue;   // skip naps
                 String d = dayOf(s.getEndTime(), s.getEndZoneOffset());
                 SleepSessionRecord prev = mainSleep.get(d);
@@ -372,7 +379,7 @@ final class Health {
             }
             for (Map.Entry<String, SleepSessionRecord> e : mainSleep.entrySet()) {
                 SleepSessionRecord s = e.getValue();
-                List<double[]> b = blocks(s.getStartTime(), s.getEndTime());
+                List<double[]> b = slice(all, s.getStartTime().getEpochSecond(), s.getEndTime().getEpochSecond());
                 if (b.isEmpty()) continue;
                 double sum = 0; for (double[] x : b) sum += x[1];
                 slp.put(new JSONArray().put(e.getKey()).put(Math.round(sum / b.size())));
@@ -382,14 +389,13 @@ final class Health {
         }
         List<long[]> workouts = new ArrayList<>();
         if (has("READ_EXERCISE"))
-            for (ExerciseSessionRecord w : readAll(ExerciseSessionRecord.class, from, to))
+            for (ExerciseSessionRecord w : readAll(ExerciseSessionRecord.class, t0, tEnd))
                 workouts.add(new long[]{w.getStartTime().getEpochSecond() - 600, w.getEndTime().getEpochSecond() + 1800});   // plus recovery time
         for (int i = 0; i < avg.length(); i++) {
             String d = avg.getJSONArray(i).getString(0);
             if (done.contains(d)) continue;
-            reply.progress(id, "resting heart rate, " + d.substring(5));
             LocalDate day = LocalDate.parse(d);
-            List<double[]> b = blocks(day.atStartOfDay(zone).toInstant(), day.plusDays(1).atStartOfDay(zone).toInstant());
+            List<double[]> b = slice(all, day.atStartOfDay(zone).toEpochSecond(), day.plusDays(1).atStartOfDay(zone).toEpochSecond());
             double low = lowest30(b, workouts);
             if (!Double.isNaN(low)) calc.put(new JSONArray().put(d).put(Math.round(low)).put("d"));
         }
@@ -398,6 +404,17 @@ final class Health {
         if (has("READ_SLEEP")) o.put("hrsleep", slp);
         o.put("rhrcalc", calc);
         return o;
+    }
+
+    private static List<double[]> slice(List<double[]> all, long a, long b) {
+        List<double[]> out = new ArrayList<>();
+        for (double[] x : all) if (x[0] >= a && x[0] < b) out.add(x);
+        return out;
+    }
+
+    /** Heart-rate trends only, for a window whose heart rate couldn't be read during a sync. */
+    void heartOnly(int id, long fromMs, long toMs) {
+        run(id, () -> new JSONObject().put("heart", heart(id, Instant.ofEpochMilli(fromMs), Instant.ofEpochMilli(toMs))));
     }
 
     private static long len(SleepSessionRecord s) { return s.getEndTime().getEpochSecond() - s.getStartTime().getEpochSecond(); }
