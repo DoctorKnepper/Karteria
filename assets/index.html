@@ -392,7 +392,7 @@ function viewToday(){
   });
   h+=`<div class="small muted">${hasTargets()? t.kcal+" of "+kcal(g)+" cal" : t.kcal+" cal · set targets in Settings to track under/over"}${t.fiber?" · "+t.fiber+" g fiber":""}</div>`;
   if(d.foods.length){
-    h+=`<ul class="list" style="margin-top:8px">`+d.foods.map((f,i)=>`<li><div class="main"><div class="t">${esc(f.name)}${f.servings&&f.servings!==1?` <span class="muted">×${f.servings}</span>`:""}</div><div class="s">${foodLine(f)}</div></div><button class="x" data-delfood="${i}" aria-label="Remove">×</button></li>`).join("")+`</ul>`;
+    h+=`<ul class="list" style="margin-top:8px">`+d.foods.map((f,i)=>`<li><div class="main" data-editfoodlog="${i}" style="cursor:pointer"><div class="t">${esc(f.name)}${f.servings&&f.servings!==1?` <span class="muted">×${f.servings}</span>`:""}</div><div class="s">${foodLine(f)}</div></div><button class="x" data-delfood="${i}" aria-label="Remove">×</button></li>`).join("")+`</ul>`;
   }
   h+=`<button class="btn full" style="margin-top:10px" data-act="addfood">+ Add food</button></div>`;
 
@@ -860,7 +860,7 @@ function viewSettings(){
   <div class="card"><h2>Your data</h2>
     <p class="small muted" style="margin-top:0">${Object.keys(S.days).length} days logged · stored only on this phone, and never copied to Google backups. ${S.settings.lastBackup?"Last backup: "+nice(keyOf(new Date(S.settings.lastBackup)))+".":"No backup saved yet."} The app reminds you if it's been 30 days.</p>
     <div style="display:grid;gap:8px"><button class="btn" data-act="export">Save backup file</button><button class="btn sec" data-act="import">Import backup file</button><button class="btn sec" data-act="csv">Export spreadsheet (CSV)</button><button class="btn danger" data-act="reset">Erase all data</button></div>
-  </div><p class="small muted" style="text-align:center">Karteria 2.8.1 · <i>karteria</i>, Stoic steadfast endurance</p></div>`;
+  </div><p class="small muted" style="text-align:center">Karteria 2.8.2 · <i>karteria</i>, Stoic steadfast endurance</p></div>`;
 }
 function itemSheet(kind,id){
   const K=KINDS[kind], x=id? items(kind).find(s=>s.id===id) : {name:"",dose:"",perDay:1};
@@ -875,13 +875,30 @@ function itemSheet(kind,id){
       save(); closeSheet(); render(); };
   });
 }
+function loggedFoodSheet(i){
+  const d=day(cur), f=d&&d.foods[i]; if(!f) return;
+  const saved=f.foodId&&S.foods.find(x=>x.id===f.foodId);
+  sheet(`<h3>Edit food</h3><label class="f">Name</label><input id="lf-n" value="${esc(f.name)}">
+    <label class="f">Servings eaten</label><input id="lf-s" type="number" inputmode="decimal" step="0.25" value="${f.servings||1}">
+    <label class="f">Macros per serving (g)</label><div class="grid3"><div><span class="small muted">Fat</span><input id="lf-f" type="number" inputmode="decimal" value="${f.fat}"></div><div><span class="small muted">Carbs</span><input id="lf-c" type="number" inputmode="decimal" value="${f.carbs}"></div><div><span class="small muted">Protein</span><input id="lf-p" type="number" inputmode="decimal" value="${f.protein}"></div></div>
+    <label class="f">Fiber (g)</label><input id="lf-fb" type="number" inputmode="decimal" value="${f.fiber||""}">
+    ${saved?`<label class="row" style="gap:8px;margin:12px 0 0"><input type="checkbox" id="lf-all" checked style="width:20px;height:20px;flex:none"> <span>Also rename “${esc(saved.name)}” in My foods and on every day it was logged</span></label>`:""}
+    <div style="height:14px"></div><button class="btn full" id="lf-save">Save</button>`, el=>{
+    el.querySelector("#lf-save").onclick=()=>{
+      const name=gv("lf-n").trim()||f.name, old=f.name;
+      Object.assign(f,{name,servings:num(gv("lf-s"))||1,fat:num(gv("lf-f"))||0,carbs:num(gv("lf-c"))||0,protein:num(gv("lf-p"))||0,fiber:num(gv("lf-fb"))||0});
+      const all=el.querySelector("#lf-all");
+      if(saved&&all&&all.checked&&name!==old){ saved.name=name; Object.values(S.days).forEach(dd=>(dd.foods||[]).forEach(x=>{ if(x.foodId===saved.id) x.name=name; })); }
+      save(); closeSheet(); render(); };
+  });
+}
 function foodEditSheet(id){
   const f=S.foods.find(x=>x.id===id);
   sheet(`<h3>Edit food</h3><label class="f">Name</label><input id="fn" value="${esc(f.name)}"><label class="f">Serving size</label><input id="fs" value="${esc(f.serving||"")}">
     <label class="f">Macros per serving (g)</label><div class="grid3"><div><span class="small muted">Fat</span><input id="ff" type="number" inputmode="decimal" value="${f.fat}"></div><div><span class="small muted">Carbs</span><input id="fc" type="number" inputmode="decimal" value="${f.carbs}"></div><div><span class="small muted">Protein</span><input id="fp" type="number" inputmode="decimal" value="${f.protein}"></div></div>
     <label class="f">Fiber (g)</label><input id="ffb" type="number" inputmode="decimal" value="${f.fiber||""}">
-    <p class="small muted">Changes apply to future entries; past days keep what was logged.</p><button class="btn full" id="fsv2">Save</button>`, el=>{
-    el.querySelector("#fsv2").onclick=()=>{ f.name=gv("fn").trim()||f.name; f.serving=gv("fs").trim(); f.fat=num(gv("ff"))||0; f.carbs=num(gv("fc"))||0; f.protein=num(gv("fp"))||0; f.fiber=num(gv("ffb"))||0; save(); closeSheet(); render(); };
+    <p class="small muted">A new name also shows on past days. Macro changes apply to future entries only.</p><button class="btn full" id="fsv2">Save</button>`, el=>{
+    el.querySelector("#fsv2").onclick=()=>{ const nn=gv("fn").trim()||f.name; if(nn!==f.name) Object.values(S.days).forEach(dd=>(dd.foods||[]).forEach(x=>{ if(x.foodId===f.id) x.name=nn; })); f.name=nn; f.serving=gv("fs").trim(); f.fat=num(gv("ff"))||0; f.carbs=num(gv("fc"))||0; f.protein=num(gv("fp"))||0; f.fiber=num(gv("ffb"))||0; save(); closeSheet(); render(); };
   });
 }
 
@@ -1701,6 +1718,7 @@ function bind(){
   q("[data-backfill]").forEach(b=>b.onclick=()=>backfillSheet(b.dataset.backfill));
   q("[data-additem]").forEach(b=>b.onclick=()=>itemSheet(b.dataset.additem,null));
   q("[data-manage]").forEach(b=>b.onclick=()=>{ tab="settings"; window.scrollTo(0,0); render(); });
+  q("[data-editfoodlog]").forEach(b=>b.onclick=()=>loggedFoodSheet(+b.dataset.editfoodlog));
   q("[data-delfood]").forEach(b=>b.onclick=()=>{ const i=+b.dataset.delfood; removeDayEntry(cur,"foods",i,day(cur).foods[i].name); });
   q("[data-delex]").forEach(b=>b.onclick=()=>{ const i=+b.dataset.delex; removeDayEntry(cur,"exercises",i,day(cur).exercises[i].type); });
   q("[data-editex]").forEach(b=>b.onclick=()=>exerciseSheet(+b.dataset.editex));
